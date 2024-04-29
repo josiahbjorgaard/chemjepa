@@ -192,8 +192,24 @@ class CJPredictor(nn.Module):
 
 
 class CJMutator(nn.Module):
-    def __init__(self):
+    def __init__(self, mask_size=2, transform=Flase):
         super(CJMutator, self).__init__()
+        self.mask_size = mask_size
+        self.transform = transform
 
     def forward(self, batch):
-        return batch
+        tokens, attention_mask = batch.values()
+        #Rotation, etc. goes here TBD
+
+        #Masking tokens
+        token_counts = attention_mask.sum(dim=1)+1
+        #Probably a faster way of doing this
+        ntok = tokens.shape(0)
+        xmask = torch.stack([
+            torch.zeros(ntok).index_fill_(0,
+                                        torch.randperm(c)[:self.mask_size],
+                                        1)
+                     for c in token_counts])
+        xbatch = {'tokens': tokens[xmask],
+                'attention_mask': attention_mask[xmask]}
+        return xbatch, xmask

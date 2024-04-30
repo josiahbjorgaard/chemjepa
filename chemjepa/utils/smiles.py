@@ -11,6 +11,15 @@ def absolute_smiles(smiles):
         smiles = None
     return smiles
 
+def rotate_smiles(self, smiles):
+    """Perform a rotation of a SMILES string
+    must be RDKit sanitizable"""
+    m = Chem.MolFromSmiles(smiles)
+    ans = list(range(m.GetNumAtoms()))
+    np.random.shuffle(ans)
+    nm = Chem.RenumberAtoms(m,ans)
+    return Chem.MolToSmiles(nm, canonical=self.canonical, isomericSmiles=self.isomericSmiles)
+
 
 class SmilesEnumerator(object):
     """SMILES Enumerator, vectorizer and devectorizer
@@ -86,5 +95,7 @@ class SmilesEnumerator(object):
                 for j,c in enumerate(ss):
                     one_hot[i,j,self._char_to_int[c]] = 1
             return one_hot
+
+
 
       

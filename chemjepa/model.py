@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
 from utils.encoders import SequenceEncoder
+from utils.tokenizer import SmilesTokenizer
+from utils.smiles import rotate_smiles
 
 from einops import rearrange, repeat, pack, unpack
 
@@ -191,11 +193,13 @@ class CJPredictor(nn.Module):
 
 
 class CJMutator(nn.Module):
-    def __init__(self, num_mask=4, mask_token=14, transform=False):
+    def __init__(self, num_mask=4, mask_token=14, transform=False, vocab_file='../data/vocab.txt', max_length=128):
         super(CJMutator, self).__init__()
         self.mask_size = num_mask
         self.mask_token = mask_token
         self.transform = transform
+        self.tokenizer = SmilesTokenizer(vocab_file)
+        self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length")
 
     def forward(self, batch):
         tokens, attention_mask = batch['input_ids'], batch['attention_mask']

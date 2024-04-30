@@ -4,8 +4,10 @@ from torch import nn, einsum, Tensor
 from utils.encoders import SequenceEncoder
 from utils.tokenizer import SmilesTokenizer
 from utils.smiles import rotate_smiles
-
+from transformers import AutoConfig, AutoModel
 from einops import rearrange, repeat, pack, unpack
+#from collections import defaultdict
+from safetensors.torch import load_model
 
 def default(*args):
     for arg in args:
@@ -240,3 +242,159 @@ class CJPreprocess(nn.Module):
         xbatch['input_ids'][xmask]=self.mask_token
         xbatch['attention_mask'][xmask]=0
         return dict(batch), dict(xbatch), xmask
+
+
+class MLP(torch.nn.Module):
+    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5, **kwargs ):
+        super().__init__()
+        self.model_type = "MLP"
+        self.dropout = nn.Dropout(dropout)
+        layers = [
+                    nn.Linear(ninp, nhid),
+                    nn.ReLU()
+                 ]
+        for n in range(nlayers):
+            layers = layers + [
+                                    nn.Dropout(dropout),
+                                    nn.Linear(nhid, nhid),
+                                    nn.ReLU()
+                              ]
+        layers = layers + [
+                                nn.Dropout(dropout),
+                                nn.Linear(nhid, ntoken)
+                          ]
+        self.model = nn.Sequential(*layers)
+        print(self.model)
+    def forward(self, batch):
+        return self.model(batch).squeeze() # #d.squeeze()
+
+
+class PretrainedHFEncoder(nn.Module):
+    def __init__(self, model_path, freeze_layers = 5, pooling_type="None", load_weights = True, **kwargs):
+        super().__init__()
+        self.model_type = "PretrainedEncoder"
+        if load_weights:
+            model_config = AutoConfig.from_pretrained(model_path)
+            #for k,v in kwargs.items():
+            #    model_config['k'] = v
+            self.model = AutoModel.from_pretrained(model_path)
+        else:
+            print(f"WARNING: Not loading model weights")
+            model_config = AutoConfig.from_pretrained(model_path)
+            #for k,v in kwargs.items():
+            #    model_config['k'] = v
+            self.model = AutoModel.from_config(model_config)
+        if freeze_layers > 0:
+            print(f"Freezing {freeze_layers} layers")
+            modules_to_freeze = [self.model.embeddings,
+                                    self.model.encoder.layer[:freeze_layers]]
+            for module in modules_to_freeze:
+                for param in module.parameters():
+                    param.requires_grad = False
+        self.pooling_type = pooling_type
+    def unfreeze_layers(self, layers):
+        raise NotImplementedError
+        #return
+    def forward(self, **kwargs):
+        output = self.model(**kwargs)
+        output = output.last_hidden_state
+        if self.pooling_type == "mean":
+            embeddings = output
+            padding_mask = kwargs['attention_mask']
+            padding_mask = repeat(padding_mask, 'b t -> b t e', e=embeddings.shape[-1])
+            output = (embeddings * padding_mask).mean(dim=1).squeeze()
+        elif self.pooling_type == "first":
+            embeddings = output
+            output = embeddings[:,0,:]
+        return output
+
+
+class PretrainedCJEncoder(nn.Module):
+    def __init__(self, run_predictor, encoder_config, predictor_config, encoder_freeze = 0, predictor_freeze = 0, pooling_type="First", load_weights = True, **kwargs):
+        super().__init__()
+        self.run_predictor=run_predictor
+        self.encoder = CJEncoder(**encoder_config)
+        load_model(self.encoder,encoder_config['weights'])
+        self.predictor = CJPredictor(**predictor_config)
+        load_model(self.predictor,predictor_config['weights'])
+
+        if encoder_freeze > 0:
+            print(f"Freezing {freeze_layers} encoder layers")
+            modules_to_freeze = [self.model.encoder,
+                                    self.model.layers[:freeze_layers]]
+            for module in modules_to_freeze:
+                for param in module.parameters():
+                    param.requires_grad = False
+        if predictor_freeze > 0:
+            print(f"Freezing {freeze_layers} predictor layers")
+            modules_to_freeze = [self.model.layers[:freeze_layers]]
+            for module in modules_to_freeze:
+                for param in module.parameters():
+                    param.requires_grad = False
+
+        self.pooling_type = pooling_type
+    def unfreeze_layers(self, layers):
+        raise NotImplementedError
+        #return
+    def forward(self, **kwargs):
+        output = self.encoder(**kwargs)
+        if self.run_predictor
+            output = self.predictor(output, kwargs['attention_mask'])
+        if self.pooling_type == "mean":
+            embeddings = output
+            padding_mask = kwargs['attention_mask']
+            padding_mask = repeat(padding_mask, 'b t -> b t e', e=embeddings.shape[-1])
+            output = (embeddings * padding_mask).mean(dim=1).squeeze()
+        elif self.pooling_type == "first":
+            embeddings = output
+            output = embeddings[:,0,:]
+        return output
+
+class FineTuneModel(nn.Module):
+    def __init__(self, run_predictor, encoder_config, decoder_config, loss_config):
+        super().__init__()
+        self.backbone = PretrainedCJEncoder(run_predictor,
+                                            encoder_config,
+                                            predictor_config,
+                                            encoder_freeze=0,
+                                            predictor_freeze=0,
+                                            pooling_type="First"
+                                            )
+
+        if decoder_config.type == "MLP":
+            self.decoder_type = "MLP"
+            self.decoder = MLP(**decoder_config)
+        elif decoder_config.type == "Linear":
+            self.decoder_type = "Linear"
+            self.decoder = nn.Linear(in_features=decoder_config['ninp'],
+                                     out_features=decoder_config['ntoken'])
+
+        if chem_config.no_loss:
+            self.loss_fct = None
+        else:
+            if loss_config.type == "mse":
+                self.loss_type = "mse"
+                self.loss_fct = nn.MSELoss()
+            elif loss_config.type == "bce":
+                self.loss_type = "bce"
+                self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([loss_config.pos_weight]))
+            else:
+                self.loss_fct = None
+
+    def forward(
+            self,
+            labels,
+            batch,
+            **kwargs,
+    ):
+
+        embedding = self.backbone(**batch)
+        if self.loss_fct:
+            logits = self.decoder(embedding).squeeze()
+
+            loss = self.loss_fct(logits, labels.float())
+
+            return loss, F.sigmoid(logits)
+        else:
+            raise Exception("remove me to get chem embeddings only")
+            return embedding

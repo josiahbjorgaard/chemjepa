@@ -8,7 +8,6 @@ from einops.layers.torch import Rearrange
 import functools
 import math
 from collections import defaultdict
-from utils.dataset import BatchDropout
 
 def cum_mul(it):
     return functools.reduce(lambda x, y: x * y, it, 1)
@@ -33,6 +32,10 @@ class TokenEncoder(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        if (x >= self.num_embeddings).sum():
+            raise Exception(f"found {x.max()}")
+        if (~torch.isfinite(x)).sum():
+            raise Exception("Found non finite vbalue")
         x = self.embedding(x)  # (batch, seq_len, embsize)
         return x
 
@@ -66,18 +69,18 @@ class SequenceEncoder(nn.Module):
     def __init__(self,
                  num_embeddings = 400, #Vocab size
                  embedding_dim = 512, #size of embedding vector
-                 padding_idx = 0, #padding (no entry) token
+                 padding_token = 0, #padding (no entry) token
                  dropout = 0.0,
                  max_tokens = 1024,
                  **kwargs
                  ):
         super().__init__()
-        self.token_encoder = TokenEncoder(num_embeddings, embedding_dim, padding_idx)
+        self.token_encoder = TokenEncoder(num_embeddings, embedding_dim, padding_token)
         self.positional_encoder = PositionalEncoder(embedding_dim, dropout, max_tokens)
 
     def forward(self, batch) -> Tensor:
-        x_t = self.token_encoder(batch['tokens'])
-        x_p = self.positional_encoder(batch['tokens'])
+        x_t = self.token_encoder(batch['input_ids'])
+        x_p = self.positional_encoder(batch['input_ids'])
         x = x_t + x_p
         return x, batch['attention_mask']
 

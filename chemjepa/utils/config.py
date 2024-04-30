@@ -32,24 +32,27 @@ def get_cfg_defaults_train():
     config.n_step_checkpoint = 20000
     config.run_eval_loop = True
 
+    config.num_mask = 4
+
     config.embedding = CN(new_allowed=True)  # None #{}
     config.embedding.pad_len = 1024
-    config.embedding.vocab_size = 450
+    config.embedding.num_embeddings = 450
+    config.embedding.padding_token = 0
 
     config.encoder = CN(new_allowed=True) #None #{}
-    config.encoder.hidden_size = 512,  # hidden size
-    config.encoder.layers = 12,  # layers
-    config.encoder.heads = 4,  # num heads
-    config.encoder.dim_head = 128,  # heads * dim_head = intermediate size
-    config.encoder.ff_mult = 4,  # Feed forward multiplier
+    config.encoder.hidden_size = 512  # hidden size
+    config.encoder.layers = 12  # layers
+    config.encoder.heads = 4  # num heads
+    config.encoder.dim_head = 128  # heads * dim_head = intermediate size
+    config.encoder.ff_mult = 4  # Feed forward multiplier
     config.encoder.ema_decay = 0.998
 
     config.predictor = CN(new_allowed=True)  # None #{}
-    config.predictor.hidden_size = 384,  # hidden size
-    config.predictor.layers = 12,  # layers
-    config.predictor.heads = 4,  # num heads
-    config.predictor.dim_head = 96,  # heads * dim_head = intermediate size
-    config.predictor.ff_mult = 4,  # Feed forward multiplier
+    config.predictor.hidden_size = 384  # hidden size
+    config.predictor.layers = 12  # layers
+    config.predictor.heads = 4  # num heads
+    config.predictor.dim_head = 96  # heads * dim_head = intermediate size
+    config.predictor.ff_mult = 4  # Feed forward multiplier
     return config.clone()
 
 def restart_cfg(config):
@@ -87,7 +90,7 @@ def training_config(filename):
 def get_model_config(config):
     #### MODEL
     model_config = {
-        'embedding': dict(config.embeddings),
+        'embedding': dict(config.embedding),
         'encoder': dict(config.encoder),
         'predictor': dict(config.predictor)
     }

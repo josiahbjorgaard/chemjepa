@@ -133,9 +133,9 @@ class CJLoss(nn.Module):
 class CJEncoder(nn.Module):
     def __init__(
             self,
-            encoder_config,
-            dim,
-            depth,
+            embedding_config,
+            hidden_size,
+            layers,
             dim_head=64,
             heads=8,
             ff_mult=4,
@@ -144,13 +144,12 @@ class CJEncoder(nn.Module):
         super().__init__()
         print(f"Got kwargs: {kwargs}")
 
-        self.heads = heads
-        self.encoder = SequenceEncoder(**encoder_config) #Contains nn.Embeddings
+        self.encoder = SequenceEncoder(**embedding_config) #Contains nn.Embeddings
 
         # transformer
         self.layers = nn.ModuleList([])
-        for _ in range(depth):
-            self.layers.append(TransformerLayer(dim, dim_head, heads, ff_mult))
+        for _ in range(layers):
+            self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
 
     def forward(
             self,
@@ -165,8 +164,8 @@ class CJEncoder(nn.Module):
 class CJPredictor(nn.Module):
     def __init__(
             self,
-            dim,
-            depth,
+            hidden_size,
+            layers,
             dim_head=64,
             heads=8,
             ff_mult=4,
@@ -178,8 +177,8 @@ class CJPredictor(nn.Module):
         self.heads = heads
         # transformer
         self.layers = nn.ModuleList([])
-        for _ in range(depth):
-            self.layers.append(TransformerLayer(dim, dim_head, heads, ff_mult))
+        for _ in range(layers):
+            self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
 
     def forward(
             self,
@@ -192,24 +191,26 @@ class CJPredictor(nn.Module):
 
 
 class CJMutator(nn.Module):
-    def __init__(self, mask_size=2, transform=Flase):
+    def __init__(self, num_mask=4, mask_token=14, transform=False):
         super(CJMutator, self).__init__()
-        self.mask_size = mask_size
+        self.mask_size = num_mask
+        self.mask_token = mask_token
         self.transform = transform
 
     def forward(self, batch):
-        tokens, attention_mask = batch.values()
+        tokens, attention_mask = batch['input_ids'], batch['attention_mask']
         #Rotation, etc. goes here TBD
 
         #Masking tokens
         token_counts = attention_mask.sum(dim=1)+1
         #Probably a faster way of doing this
-        ntok = tokens.shape(0)
+        ntok = tokens.shape[1]
         xmask = torch.stack([
-            torch.zeros(ntok).index_fill_(0,
-                                        torch.randperm(c)[:self.mask_size],
+            torch.zeros(ntok, device=tokens.device).index_fill_(0,
+                                        torch.randperm(c, device=tokens.device)[:self.mask_size],
                                         1)
-                     for c in token_counts])
-        xbatch = {'tokens': tokens[xmask],
-                'attention_mask': attention_mask[xmask]}
+                     for c in token_counts]).to(torch.bool)
+        xbatch = batch
+        xbatch['input_ids'][xmask]=self.mask_token
+        xbatch['attention_mask'][xmask]=0
         return xbatch, xmask

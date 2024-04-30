@@ -38,7 +38,7 @@ model_config = get_model_config(config)
 device = accelerator.device
 
 # Model
-xenc_model = CJEncoder(**model_config['encoder'])
+xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 pred_model = CJPredictor(**model_config['predictor'])
@@ -57,12 +57,12 @@ accelerator.init_trackers(
     )
 
 # Creating a DataLoader object for iterating over it during the training epochs
-train_dl = DataLoader( datasets["train"], batch_size=config.batch_size, shuffle=True, num_workers=8, prefetch_factor=16)
+train_dl = DataLoader( datasets["train"], batch_size=config.batch_size, shuffle=True, num_workers=4, prefetch_factor=1)
 eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size)
 
-accelerator.print(f"Number of encoder embedding parameters: {config.n_params_emb/10**6}M")
-accelerator.print(f"Number of encoder non-embedding parameters: {config.n_params_nonemb/10**6}M")
-accelerator.print(f"Number of predictor non-embedding parameters: {config.n_params_nonemb/10**6}M")
+accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
+accelerator.print(f"Number of encoder non-embedding parameters: {config.encoder_n_params_nonemb/10**6}M")
+accelerator.print(f"Number of predictor non-embedding parameters: {config.predictor_n_params_nonemb/10**6}M")
 accelerator.print(f"Number of training samples: {len(datasets['train'])}")
 accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
@@ -83,7 +83,7 @@ logger.info("Start training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
 loss_function = nn.MSELoss() #ContrastiveLossWithTemperature()
 
-mutate_function = CJMutator()
+mutate_function = CJMutator(config.num_mask)
 
 xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function = accelerator.prepare(
      xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function
@@ -109,11 +109,11 @@ for epoch in range(config.start_epoch,config.epochs):
         # Mutation and masking function here
         xbatch, xmask = mutate_function(batch)
         # Training
-        xbatch = xenc_model(xbatch)
-        xbatch = pred_model(xbatch, xmask)
+        x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
+        x = pred_model(x, batch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
         with torch.no_grad():
-            ybatch = yenc_model(batch)
-        loss = loss_function(xbatch, ybatch)
+            y = yenc_model(batch) #Target Encoder gets all context and all tokens
+        loss = loss_function(x[xmask], y[xmask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)
         if config.clip:
@@ -121,7 +121,7 @@ for epoch in range(config.start_epoch,config.epochs):
 
         optimizer.step()
         lr_scheduler.step()
-        yenc_model.update_parameters(xenc_model)
+        yenc_model.module.update_parameters(xenc_model)
 
         # Log and checkpoint
         if idb % config.n_step_checkpoint == 0:
@@ -144,17 +144,19 @@ for epoch in range(config.start_epoch,config.epochs):
         with torch.no_grad():
             epoch_loss = 0.0
             for i, batch in enumerate(tqdm(eval_dl)):
+                       # Mutation and masking function here
                 xbatch, xmask = mutate_function(batch)
                 # Training
-                xbatch = xenc_model(xbatch)
-                xbatch = pred_model(xbatch, xmask)
-                ybatch = yenc_model(batch)
-                loss = loss_function(xbatch, ybatch)
+                x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
+                x = pred_model(x, batch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
+                y = yenc_model(batch) #Target Encoder gets all context and all tokens
+                loss = loss_function(x[xmask], y[xmask]) #Loss is only for masked tokens
+
                 #Step Log
                 accelerator.log({"val_step_loss":loss.to("cpu")})
                 epoch_loss += loss.to("cpu")
             #Epoch Log
-            accelerator.log({'val_epoch_loss', epoch_loss})
+            accelerator.log({'val_epoch_loss': epoch_loss})
 
 logger.info("End training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 accelerator.save_model(xenc_model, config.output_dir + "xenc_model", safe_serialization=True)

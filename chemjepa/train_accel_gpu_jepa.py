@@ -8,8 +8,8 @@ from torch import nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, CJMutator, CJPreprocess
-from utils.training import get_param_norm, get_grad_norm, count_parameters
+from model import CJEncoder, CJPredictor, CJPreprocess
+from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
 from accelerate import Accelerator
@@ -85,8 +85,8 @@ loss_function = nn.MSELoss() #ContrastiveLossWithTemperature()
 
 preprocessing = CJPreprocess(config.num_mask, config.transform)
 
-xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function = accelerator.prepare(
-     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function
+xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing = accelerator.prepare(
+     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing
      )
 
 if config.restart:
@@ -108,6 +108,7 @@ for epoch in range(config.start_epoch,config.epochs):
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
         batch, xbatch, xmask = preprocessing(batch)
+        batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
         x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
         x = pred_model(x, xbatch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
@@ -145,7 +146,8 @@ for epoch in range(config.start_epoch,config.epochs):
             epoch_loss = 0.0
             for i, batch in enumerate(tqdm(eval_dl)):
                        # Mutation and masking function here
-                xbatch, xmask = mutate_function(batch)
+                batch, xbatch, xmask = preprocessing(batch)
+                batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
                 # Training
                 x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
                 x = pred_model(x, batch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding

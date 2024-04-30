@@ -135,6 +135,7 @@ class SmilesTokenizer(BertTokenizer):
             (ids, tok) for tok, ids in self.vocab.items()
         ])
         self.basic_tokenizer = BasicSmilesTokenizer()
+#        self.return_tensors='pt'
 
     @property
     def vocab_size(self):

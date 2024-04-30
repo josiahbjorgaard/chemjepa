@@ -19,10 +19,12 @@ dropout: 0.1
 #n_step_checkpoint: 20000
 #run_eval_loop: True
 #embedding: CN(new_allowed=True)  # None #{}
+num_mask: 4
+transform: True
 embedding:
   pad_len: 128
   embedding_dim: 384
-  num_embeddings: 600
+  num_embeddings: 1200
 encoder:
   hidden_size: 384  # hidden size
   layers: 3  # layers

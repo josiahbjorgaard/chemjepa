@@ -192,29 +192,52 @@ class CJPredictor(nn.Module):
         return tokens
 
 
-class CJMutator(nn.Module):
-    def __init__(self, num_mask=4, mask_token=14, transform=False, vocab_file='../data/vocab.txt', max_length=128):
-        super(CJMutator, self).__init__()
+class CJPreprocess(nn.Module):
+    def __init__(self, num_mask=4,
+                 mask_token=14,
+                 transform=False,
+                 vocab_file='../data/vocab.txt',
+                 max_length=128
+                 stop_token=13):
+        super().__init__()
         self.mask_size = num_mask
         self.mask_token = mask_token
         self.transform = transform
-        self.tokenizer = SmilesTokenizer(vocab_file)
-        self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length")
+        self.max_length=max_length
+        if transform:
+            self.tokenizer = SmilesTokenizer(vocab_file)
+            self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length")
 
     def forward(self, batch):
-        tokens, attention_mask = batch['input_ids'], batch['attention_mask']
-        #Rotation, etc. goes here TBD
+        smiles = batch['SMILES']
+        tokens, attention_mask = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
+
+        if transform:
+            #Rotation, etc. goes here TBD. Encode via a token to describe the rotation
+            vocab_len = len(self.tokeizer.vocab)
+            rand_rotate = torch.randint(0,self.max_length, len(smiles))
+            xsmiles = [rotate_smiles(smile, rot) for smile in zip(smiles, rot)]
+            xtokens, xattention_mask = self.tokenize(xsmiles) #batch['input_ids'], batch['attention_mask']
+            marker_tokens = (xtokens == self.stop_token).nonzero(as_tuple=True)
+            print(marker_tokens)
+            #Add embedding for rotation/permutation by adding an embedding for each rotation
+            for idx,rot in zip(marker_tokens,rand_rotate):
+                xtokens[idx] = rot+vocab_len
+        else:
+            xtokens, xattention_mask = tokens, attention_mask
 
         #Masking tokens
-        token_counts = attention_mask.sum(dim=1)+1
+        token_counts = xattention_mask.sum(dim=1)+1
         #Probably a faster way of doing this
-        ntok = tokens.shape[1]
+        ntok = xtokens.shape[1]
         xmask = torch.stack([
             torch.zeros(ntok, device=tokens.device).index_fill_(0,
-                                        torch.randperm(c, device=tokens.device)[:self.mask_size],
+                                        torch.randperm(c, device=xtokens.device)[:self.mask_size],
                                         1)
                      for c in token_counts]).to(torch.bool)
         xbatch = batch
+        xbatch['input_ids'] = xtokens
+        xbatch['attention_mask'] = xattention_mask
         xbatch['input_ids'][xmask]=self.mask_token
         xbatch['attention_mask'][xmask]=0
-        return xbatch, xmask
+        return batch, xbatch, xmask

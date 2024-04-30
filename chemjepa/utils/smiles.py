@@ -1,6 +1,17 @@
 from rdkit import Chem
 import numpy as np
-from rdkit import RDLogger  
+from rdkit import RDLogger
+from collections import deque
+
+def rotate_smiles(smiles,num): #,canonical=True,isomericSmiles=True):
+    """Perform a rotation of a SMILES string
+    must be RDKit sanitizable"""
+    m = Chem.MolFromSmiles(smiles)
+    ans = deque(list(range(m.GetNumAtoms())))
+    ans.rotate(num)
+    nm = Chem.RenumberAtoms(m,ans)
+    return Chem.MolToSmiles(nm, canonical=False)#, canonical=canonical, isomericSmiles=isomericSmiles)
+
 RDLogger.DisableLog('rdApp.*')
 
 def absolute_smiles(smiles):
@@ -11,14 +22,14 @@ def absolute_smiles(smiles):
         smiles = None
     return smiles
 
-def rotate_smiles(self, smiles):
+def rotate_smiles(smiles,num): #,canonical=True,isomericSmiles=True):
     """Perform a rotation of a SMILES string
     must be RDKit sanitizable"""
     m = Chem.MolFromSmiles(smiles)
-    ans = list(range(m.GetNumAtoms()))
-    np.random.shuffle(ans)
+    ans = deque(list(range(m.GetNumAtoms())))
+    ans.rotate(num)
     nm = Chem.RenumberAtoms(m,ans)
-    return Chem.MolToSmiles(nm, canonical=self.canonical, isomericSmiles=self.isomericSmiles)
+    return Chem.MolToSmiles(nm, canonical=False)#, canonical=canonical, isomericSmiles=isomericSmiles)
 
 
 class SmilesEnumerator(object):

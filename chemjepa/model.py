@@ -231,7 +231,7 @@ class CJPreprocess(nn.Module):
             xbatch=batch
 
         #Masking tokens
-        token_counts = xbatch['attention_mask'].sum(dim=1)+1
+        token_counts = xbatch['attention_mask'].sum(dim=1)
         #Probably a faster way of doing this
         ntok = xbatch['input_ids'].shape[1]
         xmask = torch.stack([

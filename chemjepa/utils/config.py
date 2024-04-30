@@ -33,6 +33,7 @@ def get_cfg_defaults_train():
     config.run_eval_loop = True
 
     config.num_mask = 4
+    config.transform = True
 
     config.embedding = CN(new_allowed=True)  # None #{}
     config.embedding.pad_len = 1024

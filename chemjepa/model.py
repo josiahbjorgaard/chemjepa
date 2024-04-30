@@ -351,7 +351,11 @@ class PretrainedCJEncoder(nn.Module):
         return output
 
 class FineTuneModel(nn.Module):
-    def __init__(self, run_predictor, encoder_config, decoder_config, loss_config):
+    def __init__(self, run_predictor,
+                 encoder_config,
+                 predictor_config,
+                 decoder_config,
+                 loss_config):
         super().__init__()
         self.backbone = PretrainedCJEncoder(run_predictor,
                                             encoder_config,

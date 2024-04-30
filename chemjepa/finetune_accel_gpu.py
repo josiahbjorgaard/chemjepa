@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from collections import defaultdict
 import pandas as pd
-from model import SmallMoleculeModel,chem_collator
+from model import FineTuneModel
 from utils.plotting import fast_plot
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
@@ -33,21 +33,19 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(config.seed)
 
 datasets = setup_data(config.dataset,
-                      split=config.split,
-                      shuffle=config.shuffle,
+                      split=config.split,,
                       ds_frac=config.ds_frac,
-                      ds_seed=config.ds_seed,
-                      label_col=config.label_col,
-                      var_col=config.var_col,
-                      dose_col=config.chem_encoder_config.embed_dosage)
+                      ds_seed=config.ds_seed)
 
 # Collator
 model_config = get_model_config(config)
 device = accelerator.device
 print(config.loss_config)
-model = SmallMoleculeModel(config.chem_encoder_config,
-                     config.decoder_config,
-                     config.loss_config)
+model = FineTuneModel( config.run_predictor,
+                        model_config['encoder'],
+                        model_config['predictor'],
+                        model_config['decoder']
+                        config.loss_config)
 
 config.n_params_emb, config.n_params_nonemb = count_parameters(model, print_summary=False)
 
@@ -64,12 +62,11 @@ accelerator.init_trackers(
 
 # Creating a DataLoader object for iterating over it during the training epochs
 train_dl = DataLoader( datasets["train"],
-                       collate_fn=chem_collator,
                        batch_size=config.batch_size,
                        shuffle=True,
                        num_workers=8,
                        prefetch_factor=16)
-eval_dl = DataLoader( datasets["test"], collate_fn=chem_collator, batch_size=config.batch_size)
+eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size)
 
 accelerator.print(f"Number of embedding parameters: {config.n_params_emb/10**6}M")
 accelerator.print(f"Number of non-embedding parameters: {config.n_params_nonemb/10**6}M")

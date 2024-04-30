@@ -1,0 +1,38 @@
+#label_col: "Labels"
+#estart: "" #'training_output_21_31_23_10_2023'
+#wandb_name: "No Name"
+#wandb_restart: ""
+epochs: 10
+#start_epoch: 0
+batch_size: 384
+#num_warmup_steps: 3000
+#lr_scheduler_type: "cosine"
+lr: 1e-4
+#output_dir: "" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
+dataset: "/shared/encoded_pubchem10M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
+split: 0.1
+ds_frac: 1.0
+ds_seed: 42
+seed: 42
+dropout: 0.1
+#clip: 0.0
+#n_step_checkpoint: 20000
+#run_eval_loop: True
+#embedding: CN(new_allowed=True)  # None #{}
+embedding:
+  pad_len: 128
+  embedding_dim: 384
+  num_embeddings: 600
+encoder:
+  hidden_size: 384  # hidden size
+  layers: 3  # layers
+  heads: 12  # num heads
+  dim_head: 32  # heads * dim_head: intermediate size
+  ff_mult: 4  # Feed forward multiplier
+  ema_decay: 0.998
+predictor:
+  hidden_size: 384  # hidden size
+  layers: 3  # layers
+  heads: 12  # num heads
+  dim_head: 32  # heads * dim_head: intermediate size
+  ff_mult: 4  # Feed forward multiplier

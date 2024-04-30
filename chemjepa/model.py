@@ -194,14 +194,16 @@ class CJPredictor(nn.Module):
 
 class CJPreprocess(nn.Module):
     def __init__(self, num_mask=4,
-                 mask_token=14,
                  transform=False,
                  vocab_file='../data/vocab.txt',
-                 max_length=128
-                 stop_token=13):
+                 max_length=128,
+                 stop_token=13,
+                 mask_token=14,
+                 ):
         super().__init__()
         self.mask_size = num_mask
         self.mask_token = mask_token
+        self.stop_token = stop_token
         self.transform = transform
         self.max_length=max_length
         if transform:

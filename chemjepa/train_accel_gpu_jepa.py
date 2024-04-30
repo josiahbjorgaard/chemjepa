@@ -8,7 +8,7 @@ from torch import nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, CJMutator, CJPredictor
+from model import CJEncoder, CJMutator, CJPreprocess
 from utils.training import get_param_norm, get_grad_norm, count_parameters
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
@@ -83,7 +83,7 @@ logger.info("Start training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
 loss_function = nn.MSELoss() #ContrastiveLossWithTemperature()
 
-mutate_function = CJMutator(config.num_mask)
+preprocessing = CJPreprocess(config.num_mask, config.transform)
 
 xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function = accelerator.prepare(
      xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, mutate_function
@@ -107,10 +107,10 @@ world_size = torch.cuda.device_count()
 for epoch in range(config.start_epoch,config.epochs):
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
-        xbatch, xmask = mutate_function(batch)
+        batch, xbatch, xmask = preprocessing(batch)
         # Training
         x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
-        x = pred_model(x, batch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
+        x = pred_model(x, xbatch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
         loss = loss_function(x[xmask], y[xmask]) #Loss is only for masked tokens

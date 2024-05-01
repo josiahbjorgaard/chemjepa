@@ -7,7 +7,11 @@ def rotate_smiles(smiles,num): #,canonical=True,isomericSmiles=True):
     """Perform a rotation of a SMILES string
     must be RDKit sanitizable"""
     m = Chem.MolFromSmiles(smiles)
-    ans = deque(list(range(m.GetNumAtoms())))
+    try:
+        ans = deque(list(range(m.GetNumAtoms())))
+    except:
+        print(f"Warning, could not rotate {smiles}")
+        return None
     ans.rotate(num)
     nm = Chem.RenumberAtoms(m,ans)
     return Chem.MolToSmiles(nm, canonical=False)#, canonical=canonical, isomericSmiles=isomericSmiles)
@@ -21,15 +25,6 @@ def absolute_smiles(smiles):
         print(f"Couldn't create absolute smiles for {smiles}")
         smiles = None
     return smiles
-
-def rotate_smiles(smiles,num): #,canonical=True,isomericSmiles=True):
-    """Perform a rotation of a SMILES string
-    must be RDKit sanitizable"""
-    m = Chem.MolFromSmiles(smiles)
-    ans = deque(list(range(m.GetNumAtoms())))
-    ans.rotate(num)
-    nm = Chem.RenumberAtoms(m,ans)
-    return Chem.MolToSmiles(nm, canonical=False)#, canonical=canonical, isomericSmiles=isomericSmiles)
 
 
 class SmilesEnumerator(object):

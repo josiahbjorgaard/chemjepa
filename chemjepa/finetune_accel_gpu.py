@@ -9,11 +9,12 @@ from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from collections import defaultdict
 import pandas as pd
-from model import FineTuneModel
-from utils.plotting import fast_plot
+from model import FineTuneModel, CJPreprocess
+import datasets
+#from utils.plotting import fast_plot
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
-from utils.dataset import setup_data
+#from utils.dataset import setup_data
 
 import torchmetrics as tm
 
@@ -25,6 +26,7 @@ accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
 
 #accelerator = Accelerator(log_with="wandb")
 
+
 config = training_config(sys.argv[1])
 
 logging.basicConfig(level=logging.INFO)
@@ -32,28 +34,26 @@ logger = logging.getLogger(__name__)
 
 torch.manual_seed(config.seed)
 
-datasets = setup_data(config.dataset,
-                      split=config.split,,
-                      ds_frac=config.ds_frac,
-                      ds_seed=config.ds_seed)
+dataset = datasets.load_from_disk(config.dataset).with_format('torch')
+dataset = dataset.map(lambda sample: {'labels': sample['targets'][config.loss_config.class_index]})
+#Presplit and stuff
 
 # Collator
 model_config = get_model_config(config)
 device = accelerator.device
 print(config.loss_config)
 model = FineTuneModel( config.run_predictor,
+                        model_config['embedding'],
                         model_config['encoder'],
                         model_config['predictor'],
-                        model_config['decoder']
+                        config.decoder,
                         config.loss_config)
 
+preprocessing = CJPreprocess(transform=False, mask=False, smiles_col='smiles')
 config.n_params_emb, config.n_params_nonemb = count_parameters(model, print_summary=False)
 
 # Initialise your wandb run, passing wandb parameters and any config information
 init_kwargs={"wandb": {"entity": "josiahbjorgaard"}}
-if config.restart_wandb:
-    init_kwargs["wandb"]["id"]=config.restart_wandb
-    init_kwargs["wandb"]["resume"]="must"
 accelerator.init_trackers(
     project_name=config.project_name,
     config=dict(config),
@@ -61,16 +61,16 @@ accelerator.init_trackers(
     )
 
 # Creating a DataLoader object for iterating over it during the training epochs
-train_dl = DataLoader( datasets["train"],
+train_dl = DataLoader( dataset["train"],
                        batch_size=config.batch_size,
                        shuffle=True,
                        num_workers=8,
                        prefetch_factor=16)
-eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size)
+eval_dl = DataLoader( dataset["test"], batch_size=config.batch_size)
 
 accelerator.print(f"Number of embedding parameters: {config.n_params_emb/10**6}M")
 accelerator.print(f"Number of non-embedding parameters: {config.n_params_nonemb/10**6}M")
-accelerator.print(f"Number of training samples: {len(datasets['train'])}")
+accelerator.print(f"Number of training samples: {len(dataset['train'])}")
 accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
 num_training_steps = config.epochs * len(train_dl)
@@ -88,8 +88,8 @@ if accelerator.is_main_process:
 
 logger.info("Start training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 
-model, optimizer, train_dl, eval_dl, lr_scheduler = accelerator.prepare(
-     model, optimizer, train_dl, eval_dl, lr_scheduler
+model, preprocessing, optimizer, train_dl, eval_dl, lr_scheduler = accelerator.prepare(
+     model, preprocessing, optimizer, train_dl, eval_dl, lr_scheduler
      )
 
 if config.restart:
@@ -121,13 +121,15 @@ for epoch in range(config.start_epoch,config.epochs):
     model.train()
     for idb, batch in tqdm(enumerate(train_dl)):
         # Training
+        labels = batch['labels']
+        batch = preprocessing(batch)
         batch = move_to(batch, device)
-        outputs = model(**batch)
+        outputs = model(labels, batch)
         optimizer.zero_grad()
         loss, logits = outputs #['loss']
         #loss = outputs
         for v in metrics.values():
-            v.update(logits.detach(), batch['labels'].detach())#.to(torch.long))
+            v.update(logits.detach(), labels.detach().to(torch.long))
         accelerator.backward(loss)
         if config.clip:
             accelerator.clip_grad_norm_(model.parameters(), config.clip)
@@ -162,16 +164,18 @@ for epoch in range(config.start_epoch,config.epochs):
             pred = []
             sample_index = []
             for i, batch in enumerate(tqdm(eval_dl)):
-                outputs = model(**batch)
+                labels = batch['labels']
+                batch = preprocessing(batch)
+                batch = move_to(batch, device)
+                outputs = model(labels, batch)
                 loss, logits = outputs #['loss']
                 for v in metrics.values():
-                    v.update(logits.detach(), batch['labels'].detach())#.to(torch.long))
+                    v.update(logits.detach(), labels.detach().to(torch.long))
                 losses["total_loss"] += loss.detach().to("cpu")
                 accelerator.log({"val_step_total_loss":loss.to("cpu")})
-                sample_index+=batch['sample_index'].detach().cpu().flatten().tolist()
-                true.append(batch['labels'].detach().to('cpu'))
+                #sample_index+=batch['sample_index'].detach().cpu().flatten().tolist()
+                true.append(labels.detach().to('cpu').to(torch.long))
                 pred.append(logits.detach().to('cpu'))
-            print(pred)
             pred = torch.cat(pred).flatten()
             true = torch.cat(true).flatten()
             accelerator.log({'val_epoch_'+k: v/len(eval_dl) for k, v in losses.items()})
@@ -179,11 +183,11 @@ for epoch in range(config.start_epoch,config.epochs):
             accelerator.log({"val_"+k: v.compute() for k, v in metrics.items()})
             for v in metrics.values():
                 v.reset()
-            file_path = os.path.join(config.output_dir,f"{str(epoch)}_{accelerator.process_index}_preds.csv")
-            pd.DataFrame.from_dict({
-                    'sample_index':sample_index,
-                    'true':true.tolist(),
-                    'pred':pred.tolist()}).to_csv(file_path)
+            #file_path = os.path.join(config.output_dir,f"{str(epoch)}_{accelerator.process_index}_preds.csv")
+            #pd.DataFrame.from_dict({
+            #        'sample_index':sample_index,
+            #        'true':true.tolist(),
+            #        'pred':pred.tolist()}).to_csv(file_path)
 logger.info("End training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 
 accelerator.save_model(model, config.output_dir, safe_serialization=True)

@@ -197,50 +197,67 @@ class CJPredictor(nn.Module):
 class CJPreprocess(nn.Module):
     def __init__(self, num_mask=4,
                  transform=False,
+                 mask=True,
                  vocab_file='../data/vocab.txt',
                  max_length=128,
                  stop_token=13,
                  mask_token=14,
+                 smiles_col="SMILES"
                  ):
         super().__init__()
+        self.smiles_col=smiles_col
         self.mask_size = num_mask
         self.mask_token = mask_token
         self.stop_token = stop_token
         self.transform = transform
+        self.mask = mask
         self.max_length=max_length
-        if transform:
-            self.tokenizer = SmilesTokenizer(vocab_file)
-            self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
+        self.tokenizer = SmilesTokenizer(vocab_file)
+        self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
 
     def forward(self, batch):
-        smiles = batch['SMILES']
-        device = batch['input_ids'].device
-        batch = self.tokenize(smiles)
+        smiles = batch[self.smiles_col]
 
         if self.transform:
-            #Rotation, etc. goes here TBD. Encode via a token to describe the rotation
             vocab_len = len(self.tokenizer.vocab)
+            #First rotate the initial state
+            #Rotation, etc. goes here TBD. Encode via a token to describe the rotation
+            rand_rotate = torch.randint(0,self.max_length, (len(smiles),))
+            nsmiles = [rotate_smiles(smile, rot) for smile,rot in zip(smiles, rand_rotate)]
+            smiles = [n if n else s for s,n in zip(smiles,nsmiles)]
+            batch = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
+            marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
+            #Add embedding for rotation/permutation as none for this state (0 embedding)
+            for idx,rot in zip(marker_tokens,rand_rotate):
+                batch['input_ids'][idx] = vocab_len+1
+                
             rand_rotate = torch.randint(0,self.max_length, (len(smiles),))
             xsmiles = [rotate_smiles(smile, rot) for smile,rot in zip(smiles, rand_rotate)]
+            rand_rotate = [rot if smi else 0 for smi,rot in zip(xsmiles, rand_rotate)]
+            xsmiles = [xsmi if xsmi else smi for xsmi, smi in zip(xsmiles,smiles)]
             xbatch = self.tokenize(xsmiles) #batch['input_ids'], batch['attention_mask']
             marker_tokens = (xbatch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
             #Add embedding for rotation/permutation by adding an embedding for each rotation
             for idx,rot in zip(marker_tokens,rand_rotate):
-                xbatch['input_ids'][idx] = rot+vocab_len
+                xbatch['input_ids'][idx] = rot+vocab_len+1
         else:
+            batch = self.tokenize(smiles)
             xbatch=batch
 
-        #Masking tokens
-        token_counts = xbatch['attention_mask'].sum(dim=1)
-        #Probably a faster way of doing this
-        ntok = xbatch['input_ids'].shape[1]
-        xmask = torch.stack([
-            torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
-                                        torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
-                                        1)
+        if self.mask:
+            #Masking tokens
+            token_counts = xbatch['attention_mask'].sum(dim=1)
+            #Probably a faster way of doing this
+            ntok = xbatch['input_ids'].shape[1]
+            xmask = torch.stack([
+                torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
+                                            torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
+                                            1)
                      for c in token_counts]).to(torch.bool)
-        xbatch['input_ids'][xmask]=self.mask_token
-        xbatch['attention_mask'][xmask]=0
+            xbatch['input_ids'][xmask]=self.mask_token
+            xbatch['attention_mask'][xmask]=0
+        else:
+            return dict(batch)
         return dict(batch), dict(xbatch), xmask
 
 
@@ -310,10 +327,10 @@ class PretrainedHFEncoder(nn.Module):
 
 
 class PretrainedCJEncoder(nn.Module):
-    def __init__(self, run_predictor, encoder_config, predictor_config, encoder_freeze = 0, predictor_freeze = 0, pooling_type="First", load_weights = True, **kwargs):
+    def __init__(self, run_predictor, embedding_config, encoder_config, predictor_config, encoder_freeze = 0, predictor_freeze = 0, pooling_type="first", load_weights = True, **kwargs):
         super().__init__()
         self.run_predictor=run_predictor
-        self.encoder = CJEncoder(**encoder_config)
+        self.encoder = CJEncoder(embedding_config,**encoder_config)
         load_model(self.encoder,encoder_config['weights'])
         self.predictor = CJPredictor(**predictor_config)
         load_model(self.predictor,predictor_config['weights'])
@@ -336,10 +353,10 @@ class PretrainedCJEncoder(nn.Module):
     def unfreeze_layers(self, layers):
         raise NotImplementedError
         #return
-    def forward(self, **kwargs):
-        output = self.encoder(**kwargs)
-        if self.run_predictor
-            output = self.predictor(output, kwargs['attention_mask'])
+    def forward(self, batch):
+        output = self.encoder(batch)
+        if self.run_predictor:
+            output = self.predictor(output, batch['attention_mask'])
         if self.pooling_type == "mean":
             embeddings = output
             padding_mask = kwargs['attention_mask']
@@ -352,17 +369,19 @@ class PretrainedCJEncoder(nn.Module):
 
 class FineTuneModel(nn.Module):
     def __init__(self, run_predictor,
+                 embedding_config,
                  encoder_config,
                  predictor_config,
                  decoder_config,
                  loss_config):
         super().__init__()
         self.backbone = PretrainedCJEncoder(run_predictor,
+                                            embedding_config,
                                             encoder_config,
                                             predictor_config,
                                             encoder_freeze=0,
                                             predictor_freeze=0,
-                                            pooling_type="First"
+                                            pooling_type="first"
                                             )
 
         if decoder_config.type == "MLP":
@@ -373,17 +392,14 @@ class FineTuneModel(nn.Module):
             self.decoder = nn.Linear(in_features=decoder_config['ninp'],
                                      out_features=decoder_config['ntoken'])
 
-        if chem_config.no_loss:
-            self.loss_fct = None
+        if loss_config.type == "mse":
+            self.loss_type = "mse"
+            self.loss_fct = nn.MSELoss()
+        elif loss_config.type == "bce":
+            self.loss_type = "bce"
+            self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([loss_config.pos_weight]))
         else:
-            if loss_config.type == "mse":
-                self.loss_type = "mse"
-                self.loss_fct = nn.MSELoss()
-            elif loss_config.type == "bce":
-                self.loss_type = "bce"
-                self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([loss_config.pos_weight]))
-            else:
-                self.loss_fct = None
+            self.loss_fct = None
 
     def forward(
             self,
@@ -391,11 +407,10 @@ class FineTuneModel(nn.Module):
             batch,
             **kwargs,
     ):
-
-        embedding = self.backbone(**batch)
+        batch['attention_mask'] = batch['attention_mask'].to(torch.bool)
+        embedding = self.backbone(batch)
         if self.loss_fct:
             logits = self.decoder(embedding).squeeze()
-
             loss = self.loss_fct(logits, labels.float())
 
             return loss, F.sigmoid(logits)

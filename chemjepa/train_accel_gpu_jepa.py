@@ -92,9 +92,9 @@ xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, 
 if config.restart:
     logger.info(f"Loading saved state from {config.restart}")
     accelerator.load_state(config.restart)
-    #if config.reset_lr:
-    #    for param_group in optimizer.param_groups:
-    #        param_group['lr'] = config.reset_lr
+    if config.reset_lr:
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = config.reset_lr
 
 # Start model training and defining the training loop
 

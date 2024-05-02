@@ -110,8 +110,8 @@ for epoch in range(config.start_epoch,config.epochs):
         batch, xbatch, xmask = preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
-        x = xenc_model(xbatch) #Encoder doesn't get context on masked tokens
-        x = pred_model(x, xbatch['attention_mask'].to(torch.bool)) #Predictor get's all context but doesn't get masked toekn encoding
+        x = xenc_model(xbatch, xmask) #Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
+        x = pred_model(x, batch['attention_mask'].to(torch.bool), xmask, batch['transform']) #Predictor get's all context but doesn't get masked toekn encoding
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
         loss = loss_function(x[xmask], y[xmask]) #Loss is only for masked tokens

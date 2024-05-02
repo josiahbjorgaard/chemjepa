@@ -158,11 +158,16 @@ class CJEncoder(nn.Module):
     def forward(
             self,
             batch,
+            mask = None
     ):
         tokens, attention_mask = self.encoder(batch)
+        if mask:
+            masked_tokens = tokens[mask] #Skip the masked tokens
         padding = attention_mask.to(torch.bool)
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
+        if mask:
+            tokens[mask] = masked_tokens
         return tokens
 
 class CJPredictor(nn.Module):
@@ -183,12 +188,15 @@ class CJPredictor(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers):
             self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
-
+        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 3)
     def forward(
             self,
             tokens,
             padding,
+            mask,
+            transform,
     ):
+        tokens[mask] = self.transform_mix(tokens[mask]+transform) #mix transform with mask
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
         return tokens
@@ -264,7 +272,7 @@ class CJPreprocess(nn.Module):
 
 
 class MLP(torch.nn.Module):
-    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5, **kwargs ):
+    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.1, **kwargs ):
         super().__init__()
         self.model_type = "MLP"
         self.dropout = nn.Dropout(dropout)

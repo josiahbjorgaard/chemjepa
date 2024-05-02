@@ -220,26 +220,28 @@ class CJPreprocess(nn.Module):
 
         if self.transform:
             vocab_len = len(self.tokenizer.vocab)
-            #First rotate the initial state
-            #Rotation, etc. goes here TBD. Encode via a token to describe the rotation
-            rand_rotate = torch.randint(0,self.max_length, (len(smiles),))
-            nsmiles = [rotate_smiles(smile, rot) for smile,rot in zip(smiles, rand_rotate)]
-            smiles = [n if n else s for s,n in zip(smiles,nsmiles)]
-            batch = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
-            marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-            #Add embedding for rotation/permutation as none for this state (0 embedding)
-            for idx,rot in zip(marker_tokens,rand_rotate):
-                batch['input_ids'][idx] = vocab_len+1
-                
-            rand_rotate = torch.randint(0,self.max_length, (len(smiles),))
-            xsmiles = [rotate_smiles(smile, rot) for smile,rot in zip(smiles, rand_rotate)]
-            rand_rotate = [rot if smi else 0 for smi,rot in zip(xsmiles, rand_rotate)]
-            xsmiles = [xsmi if xsmi else smi for xsmi, smi in zip(xsmiles,smiles)]
+            #First rotate to a context state. This one gets masked.
+            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
+            xsmiles = [rotate_smiles(smile, rot) for smile, rot in zip(smiles, rand_rotate)]
+            rand_rotate = [rot if smi else 0 for smi, rot in zip(xsmiles, rand_rotate)]
+            xsmiles = [xsmi if xsmi else smi for xsmi, smi in zip(xsmiles, smiles)]
             xbatch = self.tokenize(xsmiles) #batch['input_ids'], batch['attention_mask']
-            marker_tokens = (xbatch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-            #Add embedding for rotation/permutation by adding an embedding for each rotation
-            for idx,rot in zip(marker_tokens,rand_rotate):
-                xbatch['input_ids'][idx] = rot+vocab_len+1
+            #marker_tokens = (xbatch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
+            #No token for this
+            #for idx, rot in zip(marker_tokens,rand_rotate):
+            #    xbatch['input_ids'][idx] = vocab_len+1
+
+            #Rotate from the prediction state to get a target state
+            rand_rotate = torch.randint(0,self.max_length, (len(xsmiles),))
+            nsmiles = [rotate_smiles(xsmile, rot) for xsmile, rot in zip(xsmiles, rand_rotate)]
+            smiles = [n if n else s for s,n in zip(xsmiles,nsmiles)]
+            batch = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
+            #marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
+
+            #Add info for transformation
+            batch['transform'] = torch.LongTensor(rand_rotate)
+
+
         else:
             batch = self.tokenize(smiles)
             xbatch=batch
@@ -254,8 +256,8 @@ class CJPreprocess(nn.Module):
                                             torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
                                             1)
                      for c in token_counts]).to(torch.bool)
-            xbatch['input_ids'][xmask]=self.mask_token
-            xbatch['attention_mask'][xmask]=0
+            xbatch['input_ids'][xmask] = self.mask_token
+            xbatch['attention_mask'][xmask] = 0
         else:
             return dict(batch)
         return dict(batch), dict(xbatch), xmask

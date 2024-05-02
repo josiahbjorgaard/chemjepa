@@ -21,6 +21,7 @@ def get_cfg_defaults_train():
     config.num_warmup_steps = 3000
     config.lr_scheduler_type = "cosine"
     config.lr = 1e-4
+    config.reset_lr = False
     config.output_dir = "" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
     config.dataset = "/shared/dataset3M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
     config.split = 0.1

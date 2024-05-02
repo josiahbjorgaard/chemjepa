@@ -1,14 +1,16 @@
 #label_col: "Labels"
-#estart: "" #'training_output_21_31_23_10_2023'
-#wandb_name: "No Name"
-#wandb_restart: ""
-epochs: 10
-#start_epoch: 0
+restart: "training_output_02_03_01_05_2024_2/7"
+wandb_restart: "68u4dn79"
+epochs: 100
+start_epoch: 8
 batch_size: 384
 #num_warmup_steps: 3000
 #lr_scheduler_type: "cosine"
-lr: 1e-4
-#output_dir: "" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
+#lr: 1e-4
+lr_scheduler_type: "constant"
+lr: 1e-5
+#reset_lr: 1e-5
+output_dir: "training_output_02_03_01_05_2024_2_restart" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
 dataset: "/shared/encoded_pubchem10M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
 split: 0.1
 ds_frac: 1.0

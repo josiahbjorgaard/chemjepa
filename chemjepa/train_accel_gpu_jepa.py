@@ -16,10 +16,10 @@ from accelerate import Accelerator
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 torch.autograd.set_detect_anomaly(True)
 from accelerate import DistributedDataParallelKwargs
-
+from safetensors.torch import load_model
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
-#accelerator = Accelerator(log_with="wandb")
+#accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
+accelerator = Accelerator(log_with="wandb")
 
 config = training_config(sys.argv[1])
 
@@ -85,22 +85,27 @@ loss_function = nn.MSELoss() #ContrastiveLossWithTemperature()
 
 preprocessing = CJPreprocess(config.num_mask, config.transform)
 
+if config.restart:
+    logger.info(f"Loading saved state from {config.restart}")
+    load_model(xenc_model, os.path.join(config.restart,'model.safetensors'))
+    load_model(yenc_model, os.path.join(config.restart,'model_1.safetensors'))
+    load_model(pred_model, os.path.join(config.restart, 'model_2.safetensors'))
+    #load_model(optimizer, os.path.join(config.restart, 'model_3.safetensors'))
+    #accelerator.load_state(config.restart)
+    if config.reset_lr:
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = config.reset_lr
+
 xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing = accelerator.prepare(
      xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing
      )
 
-if config.restart:
-    logger.info(f"Loading saved state from {config.restart}")
-    accelerator.load_state(config.restart)
-    if config.reset_lr:
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = config.reset_lr
+#yenc_model.to(accelerator.device)
 
 # Start model training and defining the training loop
 
 xenc_model.train()
 pred_model.train()
-yenc_model.to(accelerator.device)
 yenc_model.eval()
 
 world_size = torch.cuda.device_count()

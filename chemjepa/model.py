@@ -193,8 +193,8 @@ class CJPredictor(nn.Module):
             self,
             tokens,
             padding,
-            mask,
-            transform,
+            mask=None,
+            transform=None,
     ):
         """
         mask is 2d (batch, token inde)
@@ -203,10 +203,13 @@ class CJPredictor(nn.Module):
         tokens is 3d (batch, token, embedding)
         """
         #Doing below with torch scatter would probably be faster
-        mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),transform[idx[0]].unsqueeze(0)]) for idx in mask.nonzero()])
-        transformed_tokens = self.transform_mix(mask_tokens)
-        for i,idx in enumerate(mask.nonzero()):
-            tokens[idx[0],idx[1],:]=transformed_tokens[i,:]
+        if mask is not None and transform is not None:
+            mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),
+                                                  transform[idx[0]].unsqueeze(0)])
+                                       for idx in mask.nonzero()])
+            transformed_tokens = self.transform_mix(mask_tokens)
+            for i, idx in enumerate(mask.nonzero()):
+                tokens[idx[0], idx[1], :] = transformed_tokens[i, :]
 
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
@@ -377,7 +380,10 @@ class PretrainedCJEncoder(nn.Module):
     def forward(self, batch):
         output = self.encoder(batch)
         if self.run_predictor:
-            output = self.predictor(output, batch['attention_mask'])
+            output = self.predictor(output,
+                                    batch['attention_mask'].to(torch.bool),
+                                    mask,
+                                    batch['transform'])
         if self.pooling_type == "mean":
             embeddings = output
             padding_mask = kwargs['attention_mask']

@@ -381,9 +381,8 @@ class PretrainedCJEncoder(nn.Module):
         output = self.encoder(batch)
         if self.run_predictor:
             output = self.predictor(output,
-                                    batch['attention_mask'].to(torch.bool),
-                                    mask,
-                                    batch['transform'])
+                                    batch['attention_mask'].to(torch.bool)
+                                    )
         if self.pooling_type == "mean":
             embeddings = output
             padding_mask = kwargs['attention_mask']

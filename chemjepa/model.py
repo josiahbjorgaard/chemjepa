@@ -315,12 +315,12 @@ class AttentivePooling(torch.nn.Module):
         super().__init__()
         self.model_type = "AttentivePooling"
         self.dropout = nn.Dropout(dropout)
-        self.return_tokens = nn.Parameter(torch.randn(ntoken, dim))
+        self.return_tokens = nn.Parameter(torch.randn(ntoken, nhid))
         self.attn_pool = Attention(dim=nhid, dim_head=dim_head, heads=heads)
         self.linear = nn.Linear(in_features=nhid, out_features=1)
     def forward(self, tokens, attention_mask):
 
-        pooled_tokens = self.attn_pool(self.return_tokens, tokens,
+        pooled_tokens = self.attn_pool(self.return_tokens.unsqueeze(0).repeat(tokens.shape[0],1,1), tokens,
                                        key_padding_mask=attention_mask) + self.return_tokens
         output = self.linear(pooled_tokens)
         return output
@@ -437,7 +437,7 @@ class FineTuneModel(nn.Module):
             self.decoder_type = "Linear"
             self.decoder = nn.Linear(in_features=decoder_config['ninp'],
                                      out_features=decoder_config['ntoken'])
-        elif decoder_config.typ == "Attentive":
+        elif decoder_config.type == "Attentive":
             self.decoder_type = "Attentive"
             self.decoder = AttentivePooling(**decoder_config)
 

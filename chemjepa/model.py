@@ -161,12 +161,12 @@ class CJEncoder(nn.Module):
             mask = None
     ):
         tokens, attention_mask = self.encoder(batch)
-        if mask:
+        if mask is not None:
             masked_tokens = tokens[mask] #Skip the masked tokens
         padding = attention_mask.to(torch.bool)
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
-        if mask:
+        if mask is not None:
             tokens[mask] = masked_tokens
         return tokens
 
@@ -188,7 +188,7 @@ class CJPredictor(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers):
             self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
-        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 3)
+        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1)
     def forward(
             self,
             tokens,
@@ -196,7 +196,18 @@ class CJPredictor(nn.Module):
             mask,
             transform,
     ):
-        tokens[mask] = self.transform_mix(tokens[mask]+transform) #mix transform with mask
+        """
+        mask is 2d (batch, token inde)
+        padding is 2d (batch, token index)
+        transform is 1d (batch)
+        tokens is 3d (batch, token, embedding)
+        """
+        #Doing below with torch scatter would probably be faster
+        mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),transform[idx[0]].unsqueeze(0)]) for idx in mask.nonzero()])
+        transformed_tokens = self.transform_mix(mask_tokens)
+        for i,idx in enumerate(mask.nonzero()):
+            tokens[idx[0],idx[1],:]=transformed_tokens[i,:]
+
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
         return tokens
@@ -247,7 +258,7 @@ class CJPreprocess(nn.Module):
             #marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
 
             #Add info for transformation
-            batch['transform'] = torch.LongTensor(rand_rotate)
+            batch['transform'] = rand_rotate
 
 
         else:

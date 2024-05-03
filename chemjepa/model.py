@@ -310,6 +310,22 @@ class MLP(torch.nn.Module):
         return self.model(batch).squeeze() # #d.squeeze()
 
 
+class AttentivePooling(torch.nn.Module):
+    def __init__(self, ntoken, nhid, dropout=0.1, dim_head=32, heads=8, **kwargs ):
+        super().__init__()
+        self.model_type = "AttentivePooling"
+        self.dropout = nn.Dropout(dropout)
+        self.return_tokens = nn.Parameter(torch.randn(ntoken, dim))
+        self.attn_pool = Attention(dim=nhid, dim_head=dim_head, heads=heads)
+        self.linear = nn.Linear(in_features=nhid, out_features=1)
+    def forward(self, tokens, attention_mask):
+
+        pooled_tokens = self.attn_pool(self.return_tokens, tokens,
+                                       key_padding_mask=attention_mask) + self.return_tokens
+        output = self.linear(pooled_tokens)
+        return output
+
+
 class PretrainedHFEncoder(nn.Module):
     def __init__(self, model_path, freeze_layers = 5, pooling_type="None", load_weights = True, **kwargs):
         super().__init__()
@@ -348,6 +364,9 @@ class PretrainedHFEncoder(nn.Module):
             embeddings = output
             output = embeddings[:,0,:]
         return output
+
+
+
 
 
 class PretrainedCJEncoder(nn.Module):
@@ -417,6 +436,9 @@ class FineTuneModel(nn.Module):
             self.decoder_type = "Linear"
             self.decoder = nn.Linear(in_features=decoder_config['ninp'],
                                      out_features=decoder_config['ntoken'])
+        elif decoder_config.typ == "Attentive":
+            self.decoder_type = "Attentive"
+            self.decoder = AttentivePooling(**decoder_config)
 
         if loss_config.type == "mse":
             self.loss_type = "mse"
@@ -436,7 +458,10 @@ class FineTuneModel(nn.Module):
         batch['attention_mask'] = batch['attention_mask'].to(torch.bool)
         embedding = self.backbone(batch)
         if self.loss_fct:
-            logits = self.decoder(embedding).squeeze()
+            if self.decoder_type == "Attentive":
+                logits = self.decoder(embedding, batch['attention_mask']).squeeze()
+            else:
+                logits = self.decoder(embedding).squeeze()
             loss = self.loss_fct(logits, labels.float())
 
             return loss, F.sigmoid(logits)

@@ -233,7 +233,7 @@ class CJPreprocess(nn.Module):
         self.stop_token = stop_token
         self.transform = transform
         self.mask = mask
-        self.max_length=max_length
+        self.max_length = max_length
         self.tokenizer = SmilesTokenizer(vocab_file)
         self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
 

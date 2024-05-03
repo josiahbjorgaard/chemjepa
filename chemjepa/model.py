@@ -404,7 +404,7 @@ class PretrainedCJEncoder(nn.Module):
                                     )
         if self.pooling_type == "mean":
             embeddings = output
-            padding_mask = kwargs['attention_mask']
+            padding_mask = batch['attention_mask']
             padding_mask = repeat(padding_mask, 'b t -> b t e', e=embeddings.shape[-1])
             output = (embeddings * padding_mask).mean(dim=1).squeeze()
         elif self.pooling_type == "first":
@@ -418,7 +418,8 @@ class FineTuneModel(nn.Module):
                  encoder_config,
                  predictor_config,
                  decoder_config,
-                 loss_config):
+                 loss_config,
+                 ):
         super().__init__()
         self.backbone = PretrainedCJEncoder(run_predictor,
                                             embedding_config,
@@ -426,7 +427,7 @@ class FineTuneModel(nn.Module):
                                             predictor_config,
                                             encoder_freeze=0,
                                             predictor_freeze=0,
-                                            pooling_type="first"
+                                            pooling_type=decoder_config.pooling_type
                                             )
 
         if decoder_config.type == "MLP":

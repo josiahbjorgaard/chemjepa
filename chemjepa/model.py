@@ -262,7 +262,19 @@ class CJPreprocess(nn.Module):
 
             #Add info for transformation
             batch['transform'] = rand_rotate
-
+""" Could be useful later
+from rdkit import Chem
+mol = Chem.MolFromSmiles("BrCCC(CCO)CCN")
+canonical_atom_order = Chem.CanonicalRankAtoms(mol)
+tuple(canonical_atom_order)
+(2, 5, 8, 9, 7, 4, 1, 6, 3, 0)
+canonical_atom_order_inverted = tuple(zip(*sorted((j, i) for i, j in enumerate(canonical_atom_order))))[1]
+canonical_atom_order_inverted
+(9, 6, 0, 8, 5, 1, 7, 4, 2, 3)
+canonical_mol = Chem.RenumberAtoms(mol, canonical_atom_order_inverted)
+Chem.MolToSmiles(mol, canonical=True), Chem.MolToSmiles(canonical_mol, canonical=False)
+('NCCC(CCO)CCBr', 'NCCC(CCO)CCBr')
+"""
 
         else:
             batch = self.tokenize(smiles)

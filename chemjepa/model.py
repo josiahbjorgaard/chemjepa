@@ -279,8 +279,13 @@ class CJPreprocess(nn.Module):
                                             torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
                                             1)
                      for c in token_counts]).to(torch.bool)
-            xbatch['input_ids'][xmask] = self.mask_token
+            if self.transform == "embedding":
+                for idx, (ixmask, irot) in enumerate(zip(xmask, rand_rotate)):
+                    xbatch['input_ids'][idx, ixmask] = self.mask_token + irot
+            else:
+                xbatch['input_ids'][xmask] = self.mask_token
             xbatch['attention_mask'][xmask] = 0
+
         else:
             return dict(batch)
         return dict(batch), dict(xbatch), xmask

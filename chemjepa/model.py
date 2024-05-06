@@ -266,6 +266,7 @@ class CJPreprocess(nn.Module):
 
         else:
             batch = self.tokenize(smiles)
+            batch['transform'] = None
             xbatch=batch
 
         if self.mask:

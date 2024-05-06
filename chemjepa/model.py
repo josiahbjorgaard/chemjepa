@@ -178,6 +178,7 @@ class CJPredictor(nn.Module):
             dim_head=64,
             heads=8,
             ff_mult=4,
+            transform=False,
             **kwargs
     ):
         super().__init__()
@@ -188,7 +189,7 @@ class CJPredictor(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers):
             self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
-        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1)
+        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1) if transform else None
     def forward(
             self,
             tokens,
@@ -202,8 +203,10 @@ class CJPredictor(nn.Module):
         transform is 1d (batch)
         tokens is 3d (batch, token, embedding)
         """
+
         #Doing below with torch scatter would probably be faster
         if mask is not None and transform is not None:
+            print('transform')
             mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),
                                                   transform[idx[0]].unsqueeze(0)])
                                        for idx in mask.nonzero()])

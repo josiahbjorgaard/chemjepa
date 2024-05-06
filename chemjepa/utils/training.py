@@ -14,7 +14,8 @@ def move_to(obj, device):
       res.append(move_to(v, device))
     return res
   else:
-    raise TypeError(f"Invalid type {type(obj)} for move_to")
+    return obj #pass
+      #raise TypeError(f"Invalid type {type(obj)} for move_to")
 
 def copy_batch(obj):
   if torch.is_tensor(obj):

@@ -1,7 +1,10 @@
-from rdkit import Chem
 import numpy as np
-from rdkit import RDLogger
+from rdkit import RDLogger, Chem
+from tokenizer import BasicSmilesTokenizer
+import torch.nn as nn
+import random
 from collections import deque
+
 
 def rotate_smiles(smiles,num): #,canonical=True,isomericSmiles=True):
     """Perform a rotation of a SMILES string
@@ -102,6 +105,95 @@ class SmilesEnumerator(object):
                     one_hot[i,j,self._char_to_int[c]] = 1
             return one_hot
 
+
+class SmilesTransformations(nn.Module):
+    def __init__(self,
+                 mask_size=4,
+                 **kwargs):
+        super().__init__()
+        self.mask_size = 4
+        self.init_parser = BasicSmilesTokenizer()
+
+    def _set_dummy(self, atom):
+        return atom.SetAtomicNum(0)
+
+    def _get_n_neighbors(self, seed_atom, n):
+        "Recursive connected atom search"
+        neighbors = seed_atom.GetNeighbors()
+        ret_n = set()
+        for ne in neighbors:
+            ret_n.add(ne)
+            if len(ret_n) == n:
+                return ret_n
+        for ne in ret_n:
+            ret_n = ret_n.union(self._get_n_neighbors(ne, n=n - len(ret_n)))
+            if len(ret_n) == n:
+                return ret_n
+
+    def mask(self, smiles, seed=-1):
+        mol = Chem.MolFromSmiles(smiles)
+        if seed < 0:
+            seed = random.randint(0, len(mol.GetAtoms()))
+        # Tag atoms and then rotate instead of set up dummy?
+        assert seed <= len(mol.GetAtoms())
+        seed_atom = tuple(mol.GetAtoms())[seed]
+        atoms_to_mask = self._get_n_neighbors(seed_atom, self.mask_size)
+        atom_ns = {atom.GetIdx() for atom in atoms_to_mask}
+        for atom in mol.GetAtoms():
+            if atom.GetIdx() in atom_ns:
+                atom.SetAtomicNum(0)
+        return Chem.MolToSmiles(mol, canonical=False)  # .replace(':','')
+
+    def process(self, smiles):
+        """
+        N.B. We use * token here to additionally mask non-atom tokens
+        The output is no longer a valid SMILES string and so no-longer
+        Cleanly Rotatable.
+        """
+        parsed = self.init_parser.tokenize(smiles.replace(':', ''))
+        parsed = ['*' if '*' in x else x for x in parsed]
+        for i, j in zip(range(0, len(parsed) - 1), range(1, len(parsed))):
+            if parsed[i] == '=' and parsed[j] == '*':
+                parsed[i] = '*'
+            elif parsed[i] == '*' and parsed[j].isnumeric():
+                parsed[j] = '*'
+        parsed = self._check_parentheses(parsed)
+        return "".join(parsed)
+
+    def _check_parentheses(self, parsed):
+        for i in range(len(parsed)):
+            if parsed[i] == '(':
+                for j in range(i + 1, len(parsed)):
+                    if parsed[j] == ')':
+                        parsed[i] = '*'
+                        parsed[j] = '*'
+                        break
+                    elif parsed[j] != '*':
+                        break
+        return parsed
+
+    def rotate_smiles(self, smiles, num):
+        """Perform a rotation of a SMILES string
+        must be RDKit sanitizable"""
+        m = Chem.MolFromSmiles(smiles)
+        try:
+            ans = deque(list(range(m.GetNumAtoms())))
+        except:
+            print(f"Warning, could not rotate {smiles}")
+            return None
+        ans.rotate(num)
+        nm = Chem.RenumberAtoms(Chem.Mol(m), ans)
+        return Chem.MolToSmiles(nm, canonical=False)  # , canonical=canonical, isomericSmiles=isomericSmiles)
+
+    def forward(self, smiles, rot, rot_init=0):
+        assert isinstance(smiles, str)
+        assert isinstance(rot, int)
+        if rot_init > 0:
+            smiles = self.rotate_smiles(smiles, rot_init)
+        masked_smiles = self.mask(smiles)
+        rotated_smiles = self.rotate_smiles(masked_smiles, rot)
+        # masked_smiles, rotated_smiles = Chem.MolToSmiles(masked_mol), Chem.MolToSmiles(rotated_mol)
+        return self.process(masked_smiles), self.process(rotated_smiles)
 
 
       

@@ -5,6 +5,7 @@ from time import gmtime, strftime
 from tqdm.auto import tqdm
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
@@ -115,11 +116,33 @@ for epoch in range(config.start_epoch,config.epochs):
         batch, xbatch, xmask = preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
-        x = xenc_model(xbatch, xmask) #Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
-        x = pred_model(x, batch['attention_mask'].to(torch.bool), xmask, batch['transform']) #Predictor get's all context but doesn't get masked toekn encoding
+        # Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
+        x = xenc_model(xbatch, xmask)
+        if config.transform == 'old':
+            #Predictor get's all context but doesn't get masked toekn encoding
+            x = pred_model(x, batch['attention_mask'].to(torch.bool),
+                           xmask, batch['transform'])
+            ymask = xmask
+        else:
+            #Predictor needs embeddings token+position
+            #Can get those from xenc_model with a bit of a hack
+            target_token_batch = {'input_ids': batch['transform'].repeat(1,batch['input_ids'].shape[1]),
+                                  'attention_mask': batch['pxmask']}
+            tokens, attention_mask = xenc_model.encoder(target_token_batch)
+            #Now we need to select just the tokens for prediction and append them
+            tokens = [t[a] for t, a in zip(tokens,attention_mask)]
+            max_len = max([t.shape[0] for t in tokens])
+            tokens = [F.pad(t, [0, max_len-t,0,0], value=float('nan'))]
+            tokens = torch.stack(tokens)
+            attention_mask = (~tokens.isnan()).to(torch.long)*2
+            x = torch.cat([x, tokens],dim=1)
+            attention_mask = torch.cat([xbatch['attention_mask'], attention_mask])
+            xmask = attention_mask == 2
+            x = pred_model(x, attention_mask.to(torch.bool))
+            ymask = batch['pxmask']
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
-        loss = loss_function(x[xmask], y[xmask]) #Loss is only for masked tokens
+        loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)
         if config.clip:

@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn, einsum, Tensor
 from utils.encoders import SequenceEncoder
 from utils.tokenizer import SmilesTokenizer
-from utils.smiles import rotate_smiles
+from utils.smiles import rotate_smiles, SmilesTransformations
 from transformers import AutoConfig, AutoModel
 from einops import rearrange, repeat, pack, unpack
 #from collections import defaultdict
@@ -220,7 +220,7 @@ class CJPredictor(nn.Module):
 
 class CJPreprocess(nn.Module):
     def __init__(self, num_mask=4,
-                 transform=False,
+                 transform=None,
                  mask=True,
                  vocab_file='../data/vocab.txt',
                  max_length=128,
@@ -237,12 +237,13 @@ class CJPreprocess(nn.Module):
         self.mask = mask
         self.max_length = max_length
         self.tokenizer = SmilesTokenizer(vocab_file)
+        self.smiles_transform = SmilesTransformations(mask_size = mask)
         self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
 
     def forward(self, batch):
         smiles = batch[self.smiles_col]
 
-        if self.transform:
+        if self.transform == "old":
             vocab_len = len(self.tokenizer.vocab)
             #First rotate to a context state. This one gets masked.
             rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
@@ -264,42 +265,50 @@ class CJPreprocess(nn.Module):
 
             #Add info for transformation
             batch['transform'] = rand_rotate
-            """ Could be useful later
-            from rdkit import Chem
-            mol = Chem.MolFromSmiles("BrCCC(CCO)CCN")
-            canonical_atom_order = Chem.CanonicalRankAtoms(mol)
-            tuple(canonical_atom_order)
-            (2, 5, 8, 9, 7, 4, 1, 6, 3, 0)
-            canonical_atom_order_inverted = tuple(zip(*sorted((j, i) for i, j in enumerate(canonical_atom_order))))[1]
-            canonical_atom_order_inverted
-            (9, 6, 0, 8, 5, 1, 7, 4, 2, 3)
-            canonical_mol = Chem.RenumberAtoms(mol, canonical_atom_order_inverted)
-            Chem.MolToSmiles(mol, canonical=True), Chem.MolToSmiles(canonical_mol, canonical=False)
-            ('NCCC(CCO)CCBr', 'NCCC(CCO)CCBr')
-            """
-
+        elif self.transform:
+            #The new transform for smiles with matching mask tokens in transformations
+            #N.B. the token for mask is 256 = '*' in this transformation
+            vocab_len = len(self.tokenizer.vocab)
+            rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
+            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
+            xsmiles, smiles, msmiles = [], [], []
+            for s, r, ri in zip(smiles, rand_rotate, rand_rotate_init):
+                #initially rotated, initially rotated and masked,
+                #further rotated, further rotated with mask
+                _, xms, ts, tms = self.smiles_transform(s, r, ri)
+                xsmiles.append(xms) #Masked context smiles
+                smiles.append(ts) #Unmasked target smiles
+                msmiles.append(tms) #Masked target smiles
+            xbatch = self.tokenize(xsmiles) #For context encoder
+            batch = self.tokenize(smiles) # For target encoder
+            mbatch = self.tokenize(msmiles) #For mask for predictor
+            pxmask = mbatch['input_ids'] == 256 #Mask for predictor
+            xmask = xbatch['input_ids'] == 256 #Mask for context encoder
+            #For new mask encodings, we need to set up the target mask positional
+            # encodings + embeddings later. To do that we can use the pxmask
+            # in the batch (target encoding) data
+            batch['target_mask'] = pxmask
         else:
             batch = self.tokenize(smiles)
             batch['transform'] = None
             xbatch=batch
-
         if self.mask:
-            #Masking tokens
-            token_counts = xbatch['attention_mask'].sum(dim=1)
-            #Probably a faster way of doing this
-            ntok = xbatch['input_ids'].shape[1]
-            xmask = torch.stack([
-                torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
-                                            torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
-                                            1)
-                     for c in token_counts]).to(torch.bool)
-            if self.transform == "embedding":
+            if not 'xmask' in locals():
+                #Masking tokens
+                token_counts = xbatch['attention_mask'].sum(dim=1)
+                #Probably a faster way of doing this
+                ntok = xbatch['input_ids'].shape[1]
+                xmask = torch.stack([
+                    torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
+                                                torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
+                                                1)
+                         for c in token_counts]).to(torch.bool)
+            if self.transform == "old":
                 for idx, (ixmask, irot) in enumerate(zip(xmask, rand_rotate)):
                     xbatch['input_ids'][idx, ixmask] = self.mask_token + irot
             else:
                 xbatch['input_ids'][xmask] = self.mask_token
             xbatch['attention_mask'][xmask] = 0
-
         else:
             return dict(batch)
         return dict(batch), dict(xbatch), xmask

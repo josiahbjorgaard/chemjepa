@@ -191,9 +191,9 @@ class SmilesTransformations(nn.Module):
         if rot_init > 0:
             smiles = self.rotate_smiles(smiles, rot_init)
         masked_smiles = self.mask(smiles)
-        rotated_smiles = self.rotate_smiles(masked_smiles, rot)
-        # masked_smiles, rotated_smiles = Chem.MolToSmiles(masked_mol), Chem.MolToSmiles(rotated_mol)
-        return self.process(masked_smiles), self.process(rotated_smiles)
+        rotated_smiles = self.rotate_smiles(smiles, rot)
+        rotated_masked_smiles = self.rotate_smiles(masked_smiles, rot)
+        return smiles, self.process(masked_smiles), rotated_smiles, self.process(rotated_masked_smiles)
 
 
       

@@ -1,6 +1,6 @@
 import numpy as np
 from rdkit import RDLogger, Chem
-from tokenizer import BasicSmilesTokenizer
+from utils.tokenizer import BasicSmilesTokenizer
 import torch.nn as nn
 import random
 from collections import deque
@@ -133,7 +133,7 @@ class SmilesTransformations(nn.Module):
     def mask(self, smiles, seed=-1):
         mol = Chem.MolFromSmiles(smiles)
         if seed < 0:
-            seed = random.randint(0, len(mol.GetAtoms()))
+            seed = random.randint(0, len(mol.GetAtoms())-1)
         # Tag atoms and then rotate instead of set up dummy?
         assert seed <= len(mol.GetAtoms())
         seed_atom = tuple(mol.GetAtoms())[seed]
@@ -178,16 +178,17 @@ class SmilesTransformations(nn.Module):
         m = Chem.MolFromSmiles(smiles)
         try:
             ans = deque(list(range(m.GetNumAtoms())))
-        except:
+        except Exception as e:
+            print(e)
             print(f"Warning, could not rotate {smiles}")
-            return None
+            return 
         ans.rotate(num)
         nm = Chem.RenumberAtoms(Chem.Mol(m), ans)
         return Chem.MolToSmiles(nm, canonical=False)  # , canonical=canonical, isomericSmiles=isomericSmiles)
 
     def forward(self, smiles, rot, rot_init=0):
-        assert isinstance(smiles, str)
-        assert isinstance(rot, int)
+        assert isinstance(smiles, str), f"{type(smiles)} for smiles string"
+        assert isinstance(rot, int), f"{type(rot)} for rotation integer"
         if rot_init > 0:
             smiles = self.rotate_smiles(smiles, rot_init)
         masked_smiles = self.mask(smiles)

@@ -242,7 +242,6 @@ class CJPreprocess(nn.Module):
 
     def forward(self, batch):
         smiles = batch[self.smiles_col]
-
         if self.transform == "old":
             vocab_len = len(self.tokenizer.vocab)
             #First rotate to a context state. This one gets masked.
@@ -271,23 +270,24 @@ class CJPreprocess(nn.Module):
             vocab_len = len(self.tokenizer.vocab)
             rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
             rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
-            xsmiles, smiles, msmiles = [], [], []
+            xsmiles, rsmiles, mrsmiles = [], [], []
             for s, r, ri in zip(smiles, rand_rotate, rand_rotate_init):
                 #initially rotated, initially rotated and masked,
                 #further rotated, further rotated with mask
-                _, xms, ts, tms = self.smiles_transform(s, r, ri)
+                _, xms, ts, tms = self.smiles_transform(s, int(r), int(ri))
                 xsmiles.append(xms) #Masked context smiles
-                smiles.append(ts) #Unmasked target smiles
-                msmiles.append(tms) #Masked target smiles
+                rsmiles.append(ts) #Unmasked target smiles
+                mrsmiles.append(tms) #Masked target smiles
             xbatch = self.tokenize(xsmiles) #For context encoder
-            batch = self.tokenize(smiles) # For target encoder
-            mbatch = self.tokenize(msmiles) #For mask for predictor
+            batch = self.tokenize(rsmiles) # For target encoder
+            mbatch = self.tokenize(mrsmiles) #For mask for predictor
             pxmask = mbatch['input_ids'] == 256 #Mask for predictor
             xmask = xbatch['input_ids'] == 256 #Mask for context encoder
             #For new mask encodings, we need to set up the target mask positional
             # encodings + embeddings later. To do that we can use the pxmask
             # in the batch (target encoding) data
             batch['target_mask'] = pxmask
+            batch['transform'] = rand_rotate + vocab_len
         else:
             batch = self.tokenize(smiles)
             batch['transform'] = None

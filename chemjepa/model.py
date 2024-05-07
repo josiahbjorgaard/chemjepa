@@ -189,7 +189,7 @@ class CJPredictor(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers):
             self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
-        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1) if transform else None
+        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1) if transform == "mix" else None
     def forward(
             self,
             tokens,
@@ -205,8 +205,7 @@ class CJPredictor(nn.Module):
         """
 
         #Doing below with torch scatter would probably be faster
-        if mask is not None and transform is not None:
-            print('transform')
+        if mask is not None and transform is not None and self.transform_mix is not None:
             mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),
                                                   transform[idx[0]].unsqueeze(0)])
                                        for idx in mask.nonzero()])
@@ -265,19 +264,19 @@ class CJPreprocess(nn.Module):
 
             #Add info for transformation
             batch['transform'] = rand_rotate
-""" Could be useful later
-from rdkit import Chem
-mol = Chem.MolFromSmiles("BrCCC(CCO)CCN")
-canonical_atom_order = Chem.CanonicalRankAtoms(mol)
-tuple(canonical_atom_order)
-(2, 5, 8, 9, 7, 4, 1, 6, 3, 0)
-canonical_atom_order_inverted = tuple(zip(*sorted((j, i) for i, j in enumerate(canonical_atom_order))))[1]
-canonical_atom_order_inverted
-(9, 6, 0, 8, 5, 1, 7, 4, 2, 3)
-canonical_mol = Chem.RenumberAtoms(mol, canonical_atom_order_inverted)
-Chem.MolToSmiles(mol, canonical=True), Chem.MolToSmiles(canonical_mol, canonical=False)
-('NCCC(CCO)CCBr', 'NCCC(CCO)CCBr')
-"""
+            """ Could be useful later
+            from rdkit import Chem
+            mol = Chem.MolFromSmiles("BrCCC(CCO)CCN")
+            canonical_atom_order = Chem.CanonicalRankAtoms(mol)
+            tuple(canonical_atom_order)
+            (2, 5, 8, 9, 7, 4, 1, 6, 3, 0)
+            canonical_atom_order_inverted = tuple(zip(*sorted((j, i) for i, j in enumerate(canonical_atom_order))))[1]
+            canonical_atom_order_inverted
+            (9, 6, 0, 8, 5, 1, 7, 4, 2, 3)
+            canonical_mol = Chem.RenumberAtoms(mol, canonical_atom_order_inverted)
+            Chem.MolToSmiles(mol, canonical=True), Chem.MolToSmiles(canonical_mol, canonical=False)
+            ('NCCC(CCO)CCBr', 'NCCC(CCO)CCBr')
+            """
 
         else:
             batch = self.tokenize(smiles)

@@ -16,6 +16,19 @@ def default(*args):
 def exists(val):
     return val is not None
 
+def make_predictor_tokens(encoder, transform, target_mask, dim):
+    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, dim),
+                          'attention_mask': target_mask}
+    ptokens, pattention_mask = encoder(target_token_batch)
+    #Now we need to select just the tokens for prediction and append them
+    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)]
+    max_len = max([t.shape[0] for t in ptokens])
+    ptokens = [F.pad(t, [0, 0, 0, max_len-t.shape[0]], value=float('nan')) for t in ptokens]
+    ptokens = torch.stack(ptokens)
+    pattention_mask = (~ptokens[:,:,0].isnan()).to(torch.long)
+    ptokens = torch.nan_to_num(ptokens, 0.0)
+    return ptokens, pattention_mask
+
 # bias-less layernorm
 class LayerNorm(nn.Module):
     def __init__(self, dim):
@@ -315,6 +328,7 @@ class PretrainedCJEncoder(nn.Module):
         self.run_predictor = run_predictor
         self.class_token_predictor = class_token_predictor
         self.encoder = CJEncoder(embedding_config,**encoder_config)
+        self.dim = embedding_config.hidden_size
         load_model(self.encoder, encoder_config['weights'])
         self.predictor = CJPredictor(**predictor_config)
         load_model(self.predictor, predictor_config['weights'])
@@ -342,7 +356,17 @@ class PretrainedCJEncoder(nn.Module):
         if self.run_predictor:
             if self.class_token_predictor:
                 """ To be implemented """
-                pass
+                assert self.pooling_type == 'first'
+                #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
+                transform = torch.zeros(batch['input_ids'].shape[0])
+                target_mask = torch.ones([batch['input_ids'].shape[0],1])
+                x, a = make_predictor_tokens(self.encoder.encoder,
+                                             transform,
+                                             target_mask,
+                                             self.dim)
+                output = torch.cat([x, output], dim=1)
+                batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
+
             output = self.predictor(output,
                                     batch['attention_mask'].to(torch.bool)
                                     )
@@ -413,3 +437,5 @@ class FineTuneModel(nn.Module):
         else:
             raise Exception("remove me to get chem embeddings only")
             return embedding
+
+

@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, CJPredictor
+from model import CJEncoder, CJPredictor, make_predictor_tokens
 from utils.encoders import CJPreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
@@ -132,26 +132,15 @@ for epoch in range(config.start_epoch,config.epochs):
             ymask = xmask
         else:
             x = xenc_model(xbatch) #, xmask)
-            #Predictor needs embeddings token+position
-            #Can get those from xenc_model with a bit of a hack
-            target_token_batch = {'input_ids': batch['transform'].unsqueeze(1).repeat(1,batch['input_ids'].shape[1]),
-                                  'attention_mask': batch['target_mask']}
-            tokens, attention_mask = xenc_model.module.encoder(target_token_batch)
-            #Now we need to select just the tokens for prediction and append them
-            tokens = [t[a] for t, a in zip(tokens,attention_mask)]
-            max_len = max([t.shape[0] for t in tokens])
-            tokens = [F.pad(t, [0, 0, 0, max_len-t.shape[0]], value=float('nan')) for t in tokens]
-            tokens = torch.stack(tokens)
-            #print(f"{tokens.shape} is the shape of my tokens")
-            attention_mask = (~tokens[:,:,0].isnan()).to(torch.long)*2
-            tokens = torch.nan_to_num(tokens, 0.0)
-            #print(batch['attention_mask'])
-            #print(attention_mask)
-            x = torch.cat([x, tokens],dim=1)
-            #print(f"{x.shape}/////{attention_mask.shape}///{xbatch['attention_mask'].shape}")
-            attention_mask = torch.cat([xbatch['attention_mask'], attention_mask], dim=1)
-            xmask = attention_mask == 2
+            tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
+                                                           transform=batch['transform'],
+                                                           target_mask=batch['target_mask'],
+                                                           dim=batch['input_ids'].shape[2])
+
+            x = torch.cat([x, tokens], dim=1)
+            attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
             x = pred_model(x, attention_mask.to(torch.bool))
+            xmask = attention_mask == 2
             ymask = batch['target_mask']
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
@@ -199,28 +188,16 @@ for epoch in range(config.start_epoch,config.epochs):
                 else:
                     x = xenc_model(xbatch) #, xmask)
                     #Predictor needs embeddings token+position
-                    #Can get those from xenc_model with a bit of a hack
-                    target_token_batch = {'input_ids': batch['transform'].unsqueeze(1).repeat(1,batch['input_ids'].shape[1]),
-                                          'attention_mask': batch['target_mask']}
-                    tokens, attention_mask = xenc_model.module.encoder(target_token_batch)
-                    #Now we need to select just the tokens for prediction and append them
-                    tokens = [t[a] for t, a in zip(tokens,attention_mask)]
-                    max_len = max([t.shape[0] for t in tokens])
-                    tokens = [F.pad(t, [0, 0, 0, max_len-t.shape[0]], value=float('nan')) for t in tokens]
-                    tokens = torch.stack(tokens)
-                    #print(f"{tokens.shape} is the shape of my tokens")
-                    attention_mask = (~tokens[:,:,0].isnan()).to(torch.long)*2
-                    tokens = torch.nan_to_num(tokens, 0.0)
-                    #print(batch['attention_mask'])
-                    #print(attention_mask)
+                    tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
+                                                 transform = batch['transform'],
+                                                 target_mask = batch['target_mask'],
+                                                 dim = batch['input_ids'].shape[2])
+
                     x = torch.cat([x, tokens],dim=1)
-                    #print(f"{x.shape}/////{attention_mask.shape}///{xbatch['attention_mask'].shape}")
-                    attention_mask = torch.cat([xbatch['attention_mask'], attention_mask], dim=1)
-                    xmask = attention_mask == 2
+                    attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
                     x = pred_model(x, attention_mask.to(torch.bool))
+                    xmask = attention_mask == 2
                     ymask = batch['target_mask']
-
-
                 y = yenc_model(batch) #Target Encoder gets all context and all tokens
                 loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
 

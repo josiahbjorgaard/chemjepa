@@ -395,7 +395,8 @@ class FineTuneModel(nn.Module):
                                             predictor_config,
                                             encoder_freeze=0,
                                             predictor_freeze=0,
-                                            pooling_type=decoder_config.pooling_type
+                                            pooling_type=decoder_config.pooling_type,
+                                            class_token_predictor = predictor_config.fine_tune_with_class_token
                                             )
 
         if decoder_config.type == "MLP":

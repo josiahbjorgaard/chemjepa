@@ -124,6 +124,7 @@ class CJPreprocessCollator:
                  num_mask=4,
                  transform=None,
                  mask=True,
+                 rotate = "all",
                  vocab_file='../data/vocab.txt',
                  max_length=128,
                  stop_token=13,
@@ -136,6 +137,7 @@ class CJPreprocessCollator:
         self.mask_token = mask_token
         self.stop_token = stop_token
         self.transform = transform
+        self.rotate = rotate
         self.mask = mask
         self.max_length = max_length
         self.tokenizer = SmilesTokenizer(vocab_file)
@@ -171,8 +173,15 @@ class CJPreprocessCollator:
             #The new transform for smiles with matching mask tokens in transformations
             #N.B. the token for mask is 256 = '*' in this transformation
             vocab_len = len(self.tokenizer.vocab)
-            rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
-            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
+            if self.rotate == "all":
+                rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
+                rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
+            elif self.rotate == "init":
+                rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
+                rand_rotate = torch.zeros_like(rand_rotate_init)
+            else:
+                rand_rotate_init = torch.zeros(len(smiles))
+                rand_rotate = torch.zeros(len(smiles))
             xsmiles, rsmiles, mrsmiles, res_rotate = [], [], [], []
             for s, r, ri in zip(smiles, rand_rotate, rand_rotate_init):
                 #initially rotated, initially rotated and masked,

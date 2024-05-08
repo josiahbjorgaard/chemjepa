@@ -35,6 +35,7 @@ def get_cfg_defaults_train():
 
     config.num_mask = 4
     config.transform = ""
+    config.rotate = "all"
 
     config.embedding = CN(new_allowed=True)  # None #{}
     config.embedding.pad_len = 1024

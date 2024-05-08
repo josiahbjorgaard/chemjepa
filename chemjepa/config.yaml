@@ -23,6 +23,7 @@ dropout: 0.1
 #embedding: CN(new_allowed=True)  # None #{}
 num_mask: 4
 transform: "embedding" #False, "mix", or  "embedding"
+rotate: "all"
 embedding:
   pad_len: 128
   embedding_dim: 384

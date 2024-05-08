@@ -58,7 +58,9 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
-preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask, transform = config.transform)
+preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask, 
+        transform = config.transform,
+        rotate = config.rotate)
 
 # Creating a DataLoader object for iterating over it during the training epochs
 train_dl = DataLoader( datasets["train"], batch_size=config.batch_size,

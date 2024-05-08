@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 from time import gmtime, strftime
 from tqdm.auto import tqdm
@@ -8,13 +7,11 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from collections import defaultdict
-import pandas as pd
-from model import FineTuneModel, CJPreprocess
+from model import FineTuneModel, \
+from utils.encoders import CJPreprocessCollator
 import datasets
-#from utils.plotting import fast_plot
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
-#from utils.dataset import setup_data
 
 import torchmetrics as tm
 
@@ -49,7 +46,10 @@ model = FineTuneModel( config.run_predictor,
                         config.decoder,
                         config.loss_config)
 
-preprocessing = CJPreprocess(transform=False, mask=False, smiles_col='smiles')
+preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
+        transform = config.transform,
+        rotate = config.rotate)
+
 config.n_params_emb, config.n_params_nonemb = count_parameters(model, print_summary=False)
 
 # Initialise your wandb run, passing wandb parameters and any config information
@@ -64,9 +64,13 @@ accelerator.init_trackers(
 train_dl = DataLoader( dataset["train"],
                        batch_size=config.batch_size,
                        shuffle=True,
+                       collate_fn = preprocessing_collator,
                        num_workers=8,
                        prefetch_factor=16)
-eval_dl = DataLoader( dataset["test"], batch_size=config.batch_size)
+eval_dl = DataLoader( dataset["test"],
+                      batch_size=config.batch_size,
+                      collate_fn=preprocessing_collator,
+                      )
 
 accelerator.print(f"Number of embedding parameters: {config.n_params_emb/10**6}M")
 accelerator.print(f"Number of non-embedding parameters: {config.n_params_nonemb/10**6}M")
@@ -88,13 +92,9 @@ if accelerator.is_main_process:
 
 logger.info("Start training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 
-model, preprocessing, optimizer, train_dl, eval_dl, lr_scheduler = accelerator.prepare(
-     model, preprocessing, optimizer, train_dl, eval_dl, lr_scheduler
+model, optimizer, train_dl, eval_dl, lr_scheduler = accelerator.prepare(
+     model, optimizer, train_dl, eval_dl, lr_scheduler
      )
-
-if config.restart:
-    logger.info(f"Loading saved state from {config.restart}")
-    accelerator.load_state(config.restart)
 
 # Start model training and defining the training loop
 if config.loss_config.type.lower() == "bce":
@@ -121,8 +121,9 @@ for epoch in range(config.start_epoch,config.epochs):
     model.train()
     for idb, batch in tqdm(enumerate(train_dl)):
         # Training
-        labels = batch['labels']
-        batch = preprocessing(batch)
+        batch, xbatch, xmask, metadata = batch #preprocessing(batch)
+        labels = metadata['labels']
+        labels = move_to(labels, device)
         batch = move_to(batch, device)
         outputs = model(labels, batch)
         optimizer.zero_grad()
@@ -165,7 +166,7 @@ for epoch in range(config.start_epoch,config.epochs):
             sample_index = []
             for i, batch in enumerate(tqdm(eval_dl)):
                 labels = batch['labels']
-                batch = preprocessing(batch)
+                batch, xbatch, xmask, metadata = batch  # preprocessing(batch)
                 batch = move_to(batch, device)
                 outputs = model(labels, batch)
                 loss, logits = outputs #['loss']

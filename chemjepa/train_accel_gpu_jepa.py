@@ -58,7 +58,7 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
-preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask, 
+preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
         transform = config.transform,
         rotate = config.rotate)
 
@@ -120,7 +120,7 @@ world_size = torch.cuda.device_count()
 for epoch in range(config.start_epoch,config.epochs):
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
-        batch, xbatch, xmask = batch #preprocessing(batch)
+        batch, xbatch, xmask, _ = batch #preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
         # Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
@@ -189,7 +189,7 @@ for epoch in range(config.start_epoch,config.epochs):
             epoch_loss = 0.0
             for i, batch in enumerate(tqdm(eval_dl)):
                        # Mutation and masking function here
-                batch, xbatch, xmask = batch #preprocessing(batch)
+                batch, xbatch, xmask, _ = batch
                 batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
                 # Training
                 if config.transform == 'old':

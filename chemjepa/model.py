@@ -301,13 +301,23 @@ class PretrainedHFEncoder(nn.Module):
 
 
 class PretrainedCJEncoder(nn.Module):
-    def __init__(self, run_predictor, embedding_config, encoder_config, predictor_config, encoder_freeze = 0, predictor_freeze = 0, pooling_type="first", load_weights = True, **kwargs):
+    def __init__(self, run_predictor,
+                 embedding_config,
+                 encoder_config,
+                 predictor_config,
+                 encoder_freeze = 0,
+                 predictor_freeze = 0,
+                 pooling_type="first",
+                 load_weights = True,
+                 class_token_predictor = False
+                 **kwargs):
         super().__init__()
-        self.run_predictor=run_predictor
+        self.run_predictor = run_predictor
+        self.class_token_predictor = class_token_predictor
         self.encoder = CJEncoder(embedding_config,**encoder_config)
-        load_model(self.encoder,encoder_config['weights'])
+        load_model(self.encoder, encoder_config['weights'])
         self.predictor = CJPredictor(**predictor_config)
-        load_model(self.predictor,predictor_config['weights'])
+        load_model(self.predictor, predictor_config['weights'])
 
         if encoder_freeze > 0:
             print(f"Freezing {freeze_layers} encoder layers")
@@ -330,6 +340,9 @@ class PretrainedCJEncoder(nn.Module):
     def forward(self, batch):
         output = self.encoder(batch)
         if self.run_predictor:
+            if self.class_token_predictor:
+                """ To be implemented """
+                pass
             output = self.predictor(output,
                                     batch['attention_mask'].to(torch.bool)
                                     )

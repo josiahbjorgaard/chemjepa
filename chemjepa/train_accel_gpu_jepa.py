@@ -143,8 +143,8 @@ for epoch in range(config.start_epoch,config.epochs):
             #print(f"{tokens.shape} is the shape of my tokens")
             attention_mask = (~tokens[:,:,0].isnan()).to(torch.long)*2
             tokens = torch.nan_to_num(tokens, 0.0)
-            print(batch['attention_mask'])
-            print(attention_mask)
+            #print(batch['attention_mask'])
+            #print(attention_mask)
             x = torch.cat([x, tokens],dim=1)
             #print(f"{x.shape}/////{attention_mask.shape}///{xbatch['attention_mask'].shape}")
             attention_mask = torch.cat([xbatch['attention_mask'], attention_mask], dim=1)
@@ -153,8 +153,8 @@ for epoch in range(config.start_epoch,config.epochs):
             ymask = batch['target_mask']
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
-        print(x[xmask].shape)
-        print(y[ymask].shape)
+        #print(x[xmask].shape)
+        #print(y[ymask].shape)
         loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)

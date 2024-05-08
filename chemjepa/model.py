@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
 from utils.encoders import SequenceEncoder
-from utils.tokenizer import SmilesTokenizer
-from utils.smiles import rotate_smiles, SmilesTransformations
 from transformers import AutoConfig, AutoModel
 from einops import rearrange, repeat, pack, unpack
 #from collections import defaultdict
@@ -216,102 +214,6 @@ class CJPredictor(nn.Module):
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
         return tokens
-
-
-class CJPreprocess(nn.Module):
-    def __init__(self, num_mask=4,
-                 transform=None,
-                 mask=True,
-                 vocab_file='../data/vocab.txt',
-                 max_length=128,
-                 stop_token=13,
-                 mask_token=14,
-                 smiles_col="SMILES"
-                 ):
-        super().__init__()
-        self.smiles_col=smiles_col
-        self.mask_size = num_mask
-        self.mask_token = mask_token
-        self.stop_token = stop_token
-        self.transform = transform
-        self.mask = mask
-        self.max_length = max_length
-        self.tokenizer = SmilesTokenizer(vocab_file)
-        self.smiles_transform = SmilesTransformations(mask_size = mask)
-        self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
-
-    def forward(self, batch):
-        smiles = batch[self.smiles_col]
-        if self.transform == "old":
-            vocab_len = len(self.tokenizer.vocab)
-            #First rotate to a context state. This one gets masked.
-            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
-            xsmiles = [rotate_smiles(smile, rot) for smile, rot in zip(smiles, rand_rotate)]
-            rand_rotate = [rot if smi else 0 for smi, rot in zip(xsmiles, rand_rotate)]
-            xsmiles = [xsmi if xsmi else smi for xsmi, smi in zip(xsmiles, smiles)]
-            xbatch = self.tokenize(xsmiles) #batch['input_ids'], batch['attention_mask']
-            #marker_tokens = (xbatch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-            #No token for this
-            #for idx, rot in zip(marker_tokens,rand_rotate):
-            #    xbatch['input_ids'][idx] = vocab_len+1
-
-            #Rotate from the prediction state to get a target state
-            rand_rotate = torch.randint(0,self.max_length, (len(xsmiles),))
-            nsmiles = [rotate_smiles(xsmile, rot) for xsmile, rot in zip(xsmiles, rand_rotate)]
-            smiles = [n if n else s for s,n in zip(xsmiles,nsmiles)]
-            batch = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
-            #marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-
-            #Add info for transformation
-            batch['transform'] = rand_rotate
-        elif self.transform:
-            #The new transform for smiles with matching mask tokens in transformations
-            #N.B. the token for mask is 256 = '*' in this transformation
-            vocab_len = len(self.tokenizer.vocab)
-            rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
-            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
-            xsmiles, rsmiles, mrsmiles = [], [], []
-            for s, r, ri in zip(smiles, rand_rotate, rand_rotate_init):
-                #initially rotated, initially rotated and masked,
-                #further rotated, further rotated with mask
-                _, xms, ts, tms = self.smiles_transform(s, int(r), int(ri))
-                xsmiles.append(xms) #Masked context smiles
-                rsmiles.append(ts) #Unmasked target smiles
-                mrsmiles.append(tms) #Masked target smiles
-            xbatch = self.tokenize(xsmiles) #For context encoder
-            batch = self.tokenize(rsmiles) # For target encoder
-            mbatch = self.tokenize(mrsmiles) #For mask for predictor
-            pxmask = mbatch['input_ids'] == 256 #Mask for predictor
-            xmask = xbatch['input_ids'] == 256 #Mask for context encoder
-            #For new mask encodings, we need to set up the target mask positional
-            # encodings + embeddings later. To do that we can use the pxmask
-            # in the batch (target encoding) data
-            batch['target_mask'] = pxmask
-            batch['transform'] = rand_rotate + vocab_len
-        else:
-            batch = self.tokenize(smiles)
-            batch['transform'] = None
-            xbatch=batch
-        if self.mask:
-            if not 'xmask' in locals():
-                #Masking tokens
-                token_counts = xbatch['attention_mask'].sum(dim=1)
-                #Probably a faster way of doing this
-                ntok = xbatch['input_ids'].shape[1]
-                xmask = torch.stack([
-                    torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
-                                                torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
-                                                1)
-                         for c in token_counts]).to(torch.bool)
-            if self.transform == "old":
-                for idx, (ixmask, irot) in enumerate(zip(xmask, rand_rotate)):
-                    xbatch['input_ids'][idx, ixmask] = self.mask_token + irot
-            else:
-                xbatch['input_ids'][xmask] = self.mask_token
-            xbatch['attention_mask'][xmask] = 0
-        else:
-            return dict(batch)
-        return dict(batch), dict(xbatch), xmask
 
 
 class MLP(torch.nn.Module):

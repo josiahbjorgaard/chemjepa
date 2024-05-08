@@ -9,7 +9,8 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, CJPredictor, CJPreprocess
+from model import CJEncoder, CJPredictor
+from encoders import CJPreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
@@ -57,9 +58,14 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
+preprocessing_collator = CJPreprocessCollator(config.num_mask, config.transform)
+
 # Creating a DataLoader object for iterating over it during the training epochs
-train_dl = DataLoader( datasets["train"], batch_size=config.batch_size, shuffle=True, num_workers=4, prefetch_factor=1)
-eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size)
+train_dl = DataLoader( datasets["train"], batch_size=config.batch_size,
+                       shuffle=True, num_workers=4, prefetch_factor=1,
+                       collator = preprocessing_collator)
+eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size,
+                      collator = preprocessing_collator)
 
 accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
 accelerator.print(f"Number of encoder non-embedding parameters: {config.encoder_n_params_nonemb/10**6}M")
@@ -84,7 +90,6 @@ logger.info("Start training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
 loss_function = nn.MSELoss() #ContrastiveLossWithTemperature()
 
-preprocessing = CJPreprocess(config.num_mask, config.transform)
 
 if config.restart:
     logger.info(f"Loading saved state from {config.restart}")

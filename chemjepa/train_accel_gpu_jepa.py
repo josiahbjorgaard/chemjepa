@@ -10,7 +10,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from model import CJEncoder, CJPredictor
-from encoders import CJPreprocessCollator
+from utils.encoders import CJPreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
@@ -58,14 +58,14 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
-preprocessing_collator = CJPreprocessCollator(config.num_mask, config.transform)
+preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask, transform = config.transform)
 
 # Creating a DataLoader object for iterating over it during the training epochs
 train_dl = DataLoader( datasets["train"], batch_size=config.batch_size,
-                       shuffle=True, num_workers=4, prefetch_factor=1,
-                       collator = preprocessing_collator)
+                       shuffle=True, num_workers=8, prefetch_factor=4,
+                       collate_fn = preprocessing_collator)
 eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size,
-                      collator = preprocessing_collator)
+                      collate_fn = preprocessing_collator, num_workers=8, prefetch_factor=4)
 
 accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
 accelerator.print(f"Number of encoder non-embedding parameters: {config.encoder_n_params_nonemb/10**6}M")
@@ -102,8 +102,8 @@ if config.restart:
         for param_group in optimizer.param_groups:
             param_group['lr'] = config.reset_lr
 
-xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing = accelerator.prepare(
-     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function, preprocessing
+xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
+     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
      )
 
 #yenc_model.to(accelerator.device)
@@ -118,7 +118,7 @@ world_size = torch.cuda.device_count()
 for epoch in range(config.start_epoch,config.epochs):
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
-        batch, xbatch, xmask = preprocessing(batch)
+        batch, xbatch, xmask = batch #preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
         # Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output

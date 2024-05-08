@@ -21,7 +21,7 @@ dropout: 0.1
 #n_step_checkpoint: 20000
 #run_eval_loop: True
 #embedding: CN(new_allowed=True)  # None #{}
-num_mask: 1
+num_mask: 4
 transform: "embedding" #False, "mix", or  "embedding"
 embedding:
   pad_len: 128

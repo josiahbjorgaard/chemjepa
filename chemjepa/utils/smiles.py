@@ -109,10 +109,13 @@ class SmilesEnumerator(object):
 class SmilesTransformations(nn.Module):
     def __init__(self,
                  mask_size=4,
+                 rotate=True,
                  **kwargs):
         super().__init__()
-        self.mask_size = 4
+        self.rotate = rotate
+        self.mask_size = mask_size
         self.init_parser = BasicSmilesTokenizer()
+        print(f"Initializing smiles transformation with mask size of {mask_size}")
 
     def _set_dummy(self, atom):
         return atom.SetAtomicNum(0)
@@ -178,21 +181,27 @@ class SmilesTransformations(nn.Module):
         m = Chem.MolFromSmiles(smiles)
         if not m:
             print(f"Warning, cold not rotate {smiles}")
-            return smiles
+            return smiles, 0
         ans = deque(list(range(m.GetNumAtoms())))
         ans.rotate(num)
         nm = Chem.RenumberAtoms(Chem.Mol(m), ans)
-        return Chem.MolToSmiles(nm, canonical=False)  # , canonical=canonical, isomericSmiles=isomericSmiles)
+        return Chem.MolToSmiles(nm, canonical=False), num  # , canonical=canonical, isomericSmiles=isomericSmiles)
 
     def forward(self, smiles, rot, rot_init=0):
         assert isinstance(smiles, str), f"{type(smiles)} for smiles string"
         assert isinstance(rot, int), f"{type(rot)} for rotation integer"
         if rot_init > 0:
-            smiles = self.rotate_smiles(smiles, rot_init)
+            smiles, _ = self.rotate_smiles(smiles, rot_init)
         masked_smiles = self.mask(smiles)
-        rotated_smiles = self.rotate_smiles(smiles, rot)
-        rotated_masked_smiles = self.rotate_smiles(masked_smiles, rot)
-        return smiles, self.process(masked_smiles), rotated_smiles, self.process(rotated_masked_smiles)
+        if self.rotate:
+            rotated_smiles, rot = self.rotate_smiles(smiles, rot)
+            rotated_masked_smiles, rot = self.rotate_smiles(masked_smiles, rot)
+            if rot == 0:
+                rotated_smiles, rotated_masked_smiles = smiles, masked_smiles
+        else:
+            rotated_smiles = smiles
+            rotated_masked_smiles = masked_smiles
+        return smiles, self.process(masked_smiles), rotated_smiles, self.process(rotated_masked_smiles), rot
 
 
       

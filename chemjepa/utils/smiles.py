@@ -176,12 +176,10 @@ class SmilesTransformations(nn.Module):
         """Perform a rotation of a SMILES string
         must be RDKit sanitizable"""
         m = Chem.MolFromSmiles(smiles)
-        try:
-            ans = deque(list(range(m.GetNumAtoms())))
-        except Exception as e:
-            print(e)
-            print(f"Warning, could not rotate {smiles}")
-            return 
+        if not m:
+            print(f"Warning, cold not rotate {smiles}")
+            return smiles
+        ans = deque(list(range(m.GetNumAtoms())))
         ans.rotate(num)
         nm = Chem.RenumberAtoms(Chem.Mol(m), ans)
         return Chem.MolToSmiles(nm, canonical=False)  # , canonical=canonical, isomericSmiles=isomericSmiles)

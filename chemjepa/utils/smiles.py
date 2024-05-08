@@ -135,6 +135,9 @@ class SmilesTransformations(nn.Module):
 
     def mask(self, smiles, seed=-1):
         mol = Chem.MolFromSmiles(smiles)
+        if not mol:
+            print(f"Warning, could not mask {smiles}")
+            return smiles
         if seed < 0:
             seed = random.randint(0, len(mol.GetAtoms())-1)
         # Tag atoms and then rotate instead of set up dummy?

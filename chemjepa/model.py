@@ -322,13 +322,13 @@ class PretrainedCJEncoder(nn.Module):
                  predictor_freeze = 0,
                  pooling_type="first",
                  load_weights = True,
-                 class_token_predictor = False
+                 class_token_predictor = False,
                  **kwargs):
         super().__init__()
         self.run_predictor = run_predictor
         self.class_token_predictor = class_token_predictor
         self.encoder = CJEncoder(embedding_config,**encoder_config)
-        self.dim = embedding_config.hidden_size
+        self.dim = encoder_config['hidden_size']
         load_model(self.encoder, encoder_config['weights'])
         self.predictor = CJPredictor(**predictor_config)
         load_model(self.predictor, predictor_config['weights'])
@@ -355,11 +355,10 @@ class PretrainedCJEncoder(nn.Module):
         output = self.encoder(batch)
         if self.run_predictor:
             if self.class_token_predictor:
-                """ To be implemented """
                 assert self.pooling_type == 'first'
                 #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
-                transform = torch.zeros(batch['input_ids'].shape[0])
-                target_mask = torch.ones([batch['input_ids'].shape[0],1])
+                transform = torch.zeros(batch['input_ids'].shape[0], device = batch['input_ids'].device, dtype=torch.long)
+                target_mask = torch.ones([batch['input_ids'].shape[0],1], device = batch['input_ids'].device, dtype=torch.long)
                 x, a = make_predictor_tokens(self.encoder.encoder,
                                              transform,
                                              target_mask,
@@ -396,7 +395,7 @@ class FineTuneModel(nn.Module):
                                             encoder_freeze=0,
                                             predictor_freeze=0,
                                             pooling_type=decoder_config.pooling_type,
-                                            class_token_predictor = predictor_config.fine_tune_with_class_token
+                                            class_token_predictor = predictor_config['fine_tune_with_class_token']
                                             )
 
         if decoder_config.type == "MLP":

@@ -7,7 +7,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from collections import defaultdict
-from model import FineTuneModel, \
+from model import FineTuneModel
 from utils.encoders import CJPreprocessCollator
 import datasets
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
@@ -48,7 +48,8 @@ model = FineTuneModel( config.run_predictor,
 
 preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
         transform = config.transform,
-        rotate = config.rotate)
+        rotate = config.rotate,
+        smiles_col = config.smiles_col)
 
 config.n_params_emb, config.n_params_nonemb = count_parameters(model, print_summary=False)
 
@@ -122,7 +123,7 @@ for epoch in range(config.start_epoch,config.epochs):
     for idb, batch in tqdm(enumerate(train_dl)):
         # Training
         batch, xbatch, xmask, metadata = batch #preprocessing(batch)
-        labels = metadata['labels']
+        labels = torch.FloatTensor(metadata['labels'])
         labels = move_to(labels, device)
         batch = move_to(batch, device)
         outputs = model(labels, batch)
@@ -165,8 +166,9 @@ for epoch in range(config.start_epoch,config.epochs):
             pred = []
             sample_index = []
             for i, batch in enumerate(tqdm(eval_dl)):
-                labels = batch['labels']
                 batch, xbatch, xmask, metadata = batch  # preprocessing(batch)
+                labels = torch.FloatTensor(metadata['labels'])
+                labels = move_to(labels, device) 
                 batch = move_to(batch, device)
                 outputs = model(labels, batch)
                 loss, logits = outputs #['loss']

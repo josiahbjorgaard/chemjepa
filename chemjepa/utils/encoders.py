@@ -147,6 +147,7 @@ class CJPreprocessCollator:
     def __call__(self, batch):
         #print(batch)
         smiles = [x[self.smiles_col] for x in batch]
+        metadata = {k:[x[k] for x in batch] for k in batch[0].keys()}
         if self.transform == "old":
             vocab_len = len(self.tokenizer.vocab)
             #First rotate to a context state. This one gets masked.
@@ -224,4 +225,4 @@ class CJPreprocessCollator:
             xbatch['attention_mask'][xmask] = 0
         else:
             return dict(batch)
-        return dict(batch), dict(xbatch), xmask
+        return dict(batch), dict(xbatch), xmask, metadata

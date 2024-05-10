@@ -360,15 +360,16 @@ class PretrainedCJEncoder(nn.Module):
     def forward(self, batch):
         output = self.encoder(batch)
         if self.run_predictor:
-            if self.class_token_predictor:
+            if self.class_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
                 #assert self.pooling_type == 'first'
                 #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
-                transform = torch.zeros(batch['input_ids'].shape[0], 
-                        device = batch['input_ids'].device, 
+                n_init = batch['input_ids'].shape[1]
+                transform = torch.zeros(batch['input_ids'].shape[0],
+                        device=batch['input_ids'].device,
                         dtype=torch.long)
                 if self.pooling_type == "first":
                     target_mask = torch.ones([batch['input_ids'].shape[0],1], 
-                            device = batch['input_ids'].device, 
+                            device=batch['input_ids'].device,
                             dtype=torch.long)
                 else: # self.pooling_type == "augmented":
                     target_mask = batch['attention_mask']
@@ -383,6 +384,10 @@ class PretrainedCJEncoder(nn.Module):
             output = self.predictor(output,
                                     batch['attention_mask'].to(torch.bool)
                                     )
+            if self.class_token_predictor: #Trim to mask tokens for fine tuning
+                output = output[:, n_init:, :]
+                batch['attention_mask'] = batch['attention_mask'][:, n_init, :]
+
         if self.pooling_type == "mean":
             embeddings = output
             padding_mask = batch['attention_mask']
@@ -390,8 +395,9 @@ class PretrainedCJEncoder(nn.Module):
             output = (embeddings * padding_mask).mean(dim=1).squeeze()
         elif self.pooling_type == "first":
             embeddings = output
-            output = embeddings[:,0,:]
+            output = embeddings[:, 0, :]
         return output, batch['attention_mask']
+
 
 class FineTuneModel(nn.Module):
     def __init__(self, run_predictor,

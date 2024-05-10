@@ -377,13 +377,12 @@ class PretrainedCJEncoder(nn.Module):
                                              )
                 output = torch.cat([x, output], dim=1)
                 batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
-
             output = self.predictor(output,
                                     batch['attention_mask'].to(torch.bool)
                                     )
             if self.class_token_predictor: #Trim to mask tokens for fine tuning
                 output = output[:, n_init:, :]
-                batch['attention_mask'] = batch['attention_mask'][:, n_init, :]
+                batch['attention_mask'] = batch['attention_mask'][:, n_init:]
 
         if self.pooling_type == "mean":
             embeddings = output
@@ -427,6 +426,9 @@ class FineTuneModel(nn.Module):
         if loss_config.type == "mse":
             self.loss_type = "mse"
             self.loss_fct = nn.MSELoss()
+        elif loss_config.type == "mae":
+            self.loss_type = 'mae'
+            self.loss_fct = nn.L1Loss()
         elif loss_config.type == "bce":
             self.loss_type = "bce"
             self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([loss_config.pos_weight]))
@@ -446,9 +448,11 @@ class FineTuneModel(nn.Module):
                 logits = self.decoder(embedding, attn_mask.to(torch.bool)).squeeze()
             else:
                 logits = self.decoder(embedding).squeeze()
-            loss = self.loss_fct(logits, labels.float())
-
-            return loss, F.sigmoid(logits)
+            loss = self.loss_fct(logits, labels)
+            if self.loss_type == 'bce':
+                return loss, F.sigmoid(logits)
+            else:
+                return loss, logits
         else:
             raise Exception("remove me to get chem embeddings only")
             return embedding

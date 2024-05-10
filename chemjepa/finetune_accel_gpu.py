@@ -130,8 +130,10 @@ for epoch in range(config.start_epoch,config.epochs):
         optimizer.zero_grad()
         loss, logits = outputs #['loss']
         #loss = outputs
-        for v in metrics.values():
-            v.update(logits.detach(), labels.detach().to(torch.long))
+        for k,v in metrics.items():
+            if k != 'pcc':
+                labels = labels.to(torch.long)
+            v.update(logits.detach(), labels.detach())
         accelerator.backward(loss)
         if config.clip:
             accelerator.clip_grad_norm_(model.parameters(), config.clip)
@@ -172,8 +174,10 @@ for epoch in range(config.start_epoch,config.epochs):
                 batch = move_to(batch, device)
                 outputs = model(labels, batch)
                 loss, logits = outputs #['loss']
-                for v in metrics.values():
-                    v.update(logits.detach(), labels.detach().to(torch.long))
+                for k,v in metrics.items():
+                    if k != 'pcc':
+                        labels = labels.to(torch.long)
+                    v.update(logits.detach(), labels.detach())
                 losses["total_loss"] += loss.detach().to("cpu")
                 accelerator.log({"val_step_total_loss":loss.to("cpu")})
                 #sample_index+=batch['sample_index'].detach().cpu().flatten().tolist()

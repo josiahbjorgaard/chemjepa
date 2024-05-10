@@ -51,7 +51,7 @@ def get_cfg_defaults_train():
     config.encoder.dim_head = 128  # heads * dim_head = intermediate size
     config.encoder.ff_mult = 4  # Feed forward multiplier
     config.encoder.ema_decay = 0.998
-
+    config.encoder.freeze_layers = 0
     config.predictor = CN(new_allowed=True)  # None #{}
     config.predictor.hidden_size = 384  # hidden size
     config.predictor.layers = 12  # layers
@@ -59,6 +59,7 @@ def get_cfg_defaults_train():
     config.predictor.dim_head = 96  # heads * dim_head = intermediate size
     config.predictor.ff_mult = 4  # Feed forward multiplier
     config.predictor.fine_tune_with_class_token = False
+    config.predictor.freeze_layers = 0
     config.decoder = CN(new_allowed=True)
     return config.clone()
 

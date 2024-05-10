@@ -19,6 +19,7 @@ from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 torch.autograd.set_detect_anomaly(True)
 from accelerate import DistributedDataParallelKwargs
 from safetensors.torch import load_model
+torch.autograd.set_detect_anomaly(True)
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 #accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
 accelerator = Accelerator(log_with="wandb")
@@ -77,7 +78,7 @@ accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
 num_training_steps = config.epochs * len(train_dl)
 
-optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr) # * world_size)
+optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr, weight_decay = 0.25) # * world_size)
 lr_scheduler = get_scheduler(
         name=config.lr_scheduler_type,
         optimizer=optimizer,
@@ -132,18 +133,28 @@ for epoch in range(config.start_epoch,config.epochs):
             ymask = xmask
         else:
             x = xenc_model(xbatch) #, xmask)
+            enc_var = torch.var(x.detach(), dim=0).mean().cpu()
             tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
                                                            transform=batch['transform'],
                                                            target_mask=batch['target_mask'],
-                                                           dim=batch['input_ids'].shape[2])
+                                                           )
 
             x = torch.cat([x, tokens], dim=1)
             attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
+            if (~torch.isfinite(attention_mask)).sum():
+                print(attention_mask)
+                raise Exception('Nan value in mask')
+            elif (~torch.isfinite(x)).sum():
+                print(x)
+                raise Exception("Nan value in x")
             x = pred_model(x, attention_mask.to(torch.bool))
+            pred_var = torch.var(x.detach(), dim=0).mean().cpu()
             xmask = attention_mask == 2
             ymask = batch['target_mask']
+            
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
+            y_var = torch.var(y, dim=0).mean().cpu()
         #print(x[xmask].shape)
         #print(y[ymask].shape)
         loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
@@ -161,7 +172,11 @@ for epoch in range(config.start_epoch,config.epochs):
             accelerator.save_state(config.output_dir)
         if accelerator.is_main_process:
             progress_bar.update(world_size)
+
         accelerator.log({"total_loss": loss.detach().to("cpu"),
+                         "xenc_var": enc_var,
+                         "pred_var": pred_var,
+                         "yenc_var": y_var,
                          "xenc_param_norm": get_param_norm(xenc_model).to("cpu"),
                          "xenc_grad_norm": get_grad_norm(xenc_model).to("cpu"),
                          "pred_param_norm": get_param_norm(pred_model).to("cpu"),
@@ -191,8 +206,7 @@ for epoch in range(config.start_epoch,config.epochs):
                     tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
                                                  transform = batch['transform'],
                                                  target_mask = batch['target_mask'],
-                                                 dim = batch['input_ids'].shape[2])
-
+                                                )
                     x = torch.cat([x, tokens],dim=1)
                     attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
                     x = pred_model(x, attention_mask.to(torch.bool))

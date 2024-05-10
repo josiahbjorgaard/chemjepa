@@ -16,8 +16,8 @@ def default(*args):
 def exists(val):
     return val is not None
 
-def make_predictor_tokens(encoder, transform, target_mask, dim):
-    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, dim),
+def make_predictor_tokens(encoder, transform, target_mask):
+    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, target_mask.shape[1]),
                           'attention_mask': target_mask}
     ptokens, pattention_mask = encoder(target_token_batch)
     #Now we need to select just the tokens for prediction and append them
@@ -120,11 +120,15 @@ class TransformerLayer(nn.Module):
         self.attn = Attention(dim=dim, dim_head=dim_head, heads=heads)
         self.num_heads = heads
         self.ff = FeedForward(dim=dim, mult=ff_mult)
-        self.norm = LayerNorm(dim)         
+        self.norm = torch.nn.LayerNorm(dim)         
     
     def forward(self, batch, attn_mask=None, padding_mask=None):
+        if (~torch.isfinite(batch)).sum():
+            raise Exception("nan in batch")
         batch = self.norm(batch)
         batch = self.attn(batch, attn_mask=attn_mask, key_padding_mask = padding_mask) + batch
+        if (~torch.isfinite(batch)).sum():
+            raise Exception("nan in batch after attn")
         batch = self.norm(batch)
         batch = self.ff(batch) + batch
         return batch
@@ -329,9 +333,11 @@ class PretrainedCJEncoder(nn.Module):
         self.class_token_predictor = class_token_predictor
         self.encoder = CJEncoder(embedding_config,**encoder_config)
         self.dim = encoder_config['hidden_size']
-        load_model(self.encoder, encoder_config['weights'])
+        if 'weights' in encoder_config:
+            load_model(self.encoder, encoder_config['weights'])
         self.predictor = CJPredictor(**predictor_config)
-        load_model(self.predictor, predictor_config['weights'])
+        if 'weights' in predictor_config:
+            load_model(self.predictor, predictor_config['weights'])
 
         if encoder_freeze > 0:
             print(f"Freezing {freeze_layers} encoder layers")
@@ -355,14 +361,22 @@ class PretrainedCJEncoder(nn.Module):
         output = self.encoder(batch)
         if self.run_predictor:
             if self.class_token_predictor:
-                assert self.pooling_type == 'first'
+                #assert self.pooling_type == 'first'
                 #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
-                transform = torch.zeros(batch['input_ids'].shape[0], device = batch['input_ids'].device, dtype=torch.long)
-                target_mask = torch.ones([batch['input_ids'].shape[0],1], device = batch['input_ids'].device, dtype=torch.long)
+                transform = torch.zeros(batch['input_ids'].shape[0], 
+                        device = batch['input_ids'].device, 
+                        dtype=torch.long)
+                if self.pooling_type == "first":
+                    target_mask = torch.ones([batch['input_ids'].shape[0],1], 
+                            device = batch['input_ids'].device, 
+                            dtype=torch.long)
+                else: # self.pooling_type == "augmented":
+                    target_mask = batch['attention_mask']
+                
                 x, a = make_predictor_tokens(self.encoder.encoder,
                                              transform,
                                              target_mask,
-                                             self.dim)
+                                             )
                 output = torch.cat([x, output], dim=1)
                 batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
 
@@ -377,7 +391,7 @@ class PretrainedCJEncoder(nn.Module):
         elif self.pooling_type == "first":
             embeddings = output
             output = embeddings[:,0,:]
-        return output
+        return output, batch['attention_mask']
 
 class FineTuneModel(nn.Module):
     def __init__(self, run_predictor,
@@ -425,10 +439,10 @@ class FineTuneModel(nn.Module):
             **kwargs,
     ):
         batch['attention_mask'] = batch['attention_mask'].to(torch.bool)
-        embedding = self.backbone(batch)
+        embedding, attn_mask = self.backbone(batch)
         if self.loss_fct:
             if self.decoder_type == "Attentive":
-                logits = self.decoder(embedding, batch['attention_mask']).squeeze()
+                logits = self.decoder(embedding, attn_mask.to(torch.bool)).squeeze()
             else:
                 logits = self.decoder(embedding).squeeze()
             loss = self.loss_fct(logits, labels.float())

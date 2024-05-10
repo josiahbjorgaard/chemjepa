@@ -322,10 +322,7 @@ class PretrainedCJEncoder(nn.Module):
                  embedding_config,
                  encoder_config,
                  predictor_config,
-                 encoder_freeze = 0,
-                 predictor_freeze = 0,
                  pooling_type="first",
-                 load_weights = True,
                  class_token_predictor = False,
                  **kwargs):
         super().__init__()
@@ -339,16 +336,16 @@ class PretrainedCJEncoder(nn.Module):
         if 'weights' in predictor_config:
             load_model(self.predictor, predictor_config['weights'])
 
-        if encoder_freeze > 0:
-            print(f"Freezing {freeze_layers} encoder layers")
-            modules_to_freeze = [self.model.encoder,
-                                    self.model.layers[:freeze_layers]]
+        if encoder_config['freeze_layers'] > 0:
+            print(f"Freezing {encoder_config['freeze_layers']} encoder layers")
+            modules_to_freeze = [self.encoder.encoder,
+                                    self.encoder.layers[:encoder_config['freeze_layers']]]
             for module in modules_to_freeze:
                 for param in module.parameters():
                     param.requires_grad = False
-        if predictor_freeze > 0:
-            print(f"Freezing {freeze_layers} predictor layers")
-            modules_to_freeze = [self.model.layers[:freeze_layers]]
+        if predictor_config['freeze_layers'] > 0:
+            print(f"Freezing {predictor_config['freeze_layers']} predictor layers")
+            modules_to_freeze = [self.predictor.layers[:predictor_config['freeze_layers']]]
             for module in modules_to_freeze:
                 for param in module.parameters():
                     param.requires_grad = False
@@ -412,8 +409,6 @@ class FineTuneModel(nn.Module):
                                             embedding_config,
                                             encoder_config,
                                             predictor_config,
-                                            encoder_freeze=0,
-                                            predictor_freeze=0,
                                             pooling_type=decoder_config.pooling_type,
                                             class_token_predictor = predictor_config['fine_tune_with_class_token']
                                             )

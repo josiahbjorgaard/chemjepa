@@ -1,12 +1,13 @@
 #label_col: "Labels"
-restart: "test2_newT15e4/2"
-wandb_restart: "vnjuxtc2"
+#restart: "test2_new5e4/2"
+#wandb_restart: "vnjuxtc2"
 epochs: 100
-start_epoch: 1
+#start_epoch: 1
 batch_size: 384
-num_warmup_steps: 30
+num_warmup_steps: 10000
 lr_scheduler_type: "cosine"
 lr: 5e-4
+weight_decay: 0.1
 #lr_scheduler_type: "constant"
 #lr: 1e-5
 #reset_lr: True
@@ -16,7 +17,7 @@ split: 0.1
 ds_frac: 1.0
 ds_seed: 42
 seed: 42
-dropout: 0.1
+dropout: 0.0
 #clip: 0.0
 #n_step_checkpoint: 20000
 #run_eval_loop: True

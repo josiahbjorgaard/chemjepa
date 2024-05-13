@@ -431,7 +431,7 @@ class FineTuneModel(nn.Module):
             self.loss_fct = nn.L1Loss()
         elif loss_config.type == "bce":
             self.loss_type = "bce"
-            self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([loss_config.pos_weight]))
+            self.loss_fct = nn.BCEWithLogitsLoss()#pos_weight=torch.Tensor([loss_config.pos_weight]))
         else:
             self.loss_fct = None
 

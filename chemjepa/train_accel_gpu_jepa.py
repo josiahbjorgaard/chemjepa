@@ -78,7 +78,7 @@ accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
 num_training_steps = config.epochs * len(train_dl)
 
-optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr, weight_decay = 0.25) # * world_size)
+optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr, weight_decay = config.weight_decay)
 lr_scheduler = get_scheduler(
         name=config.lr_scheduler_type,
         optimizer=optimizer,

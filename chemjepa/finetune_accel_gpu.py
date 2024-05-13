@@ -112,6 +112,8 @@ if config.loss_config.type.lower() == "bce":
 else:
     metrics = {
         'pcc':  tm.PearsonCorrCoef(),
+        'mae': tm.MeanAbsoluteError(),
+        'mse': tm.MeanSquaredError(),
         }
 
 for v in metrics.values():
@@ -131,7 +133,7 @@ for epoch in range(config.start_epoch,config.epochs):
         loss, logits = outputs #['loss']
         #loss = outputs
         for k,v in metrics.items():
-            if k != 'pcc':
+            if k not in ['pcc', 'mse', 'mae']:
                 labels = labels.to(torch.long)
             v.update(logits.detach(), labels.detach())
         accelerator.backward(loss)
@@ -175,7 +177,7 @@ for epoch in range(config.start_epoch,config.epochs):
                 outputs = model(labels, batch)
                 loss, logits = outputs #['loss']
                 for k,v in metrics.items():
-                    if k != 'pcc':
+                    if k not in ['pcc', 'mse', 'mae']:
                         labels = labels.to(torch.long)
                     v.update(logits.detach(), labels.detach())
                 losses["total_loss"] += loss.detach().to("cpu")

@@ -4,27 +4,27 @@
 epochs: 100
 #start_epoch: 1
 batch_size: 384
-num_warmup_steps: 10000
+num_warmup_steps: 100000
 lr_scheduler_type: "cosine"
-lr: 5e-4
-weight_decay: 0.1
+lr: 1e-3
+weight_decay: 0.4
 #lr_scheduler_type: "constant"
 #lr: 1e-5
 #reset_lr: True
-output_dir: "test2_newT15e4" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
+output_dir: "test_base_1e3_0" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
 dataset: "/shared/encoded_pubchem10M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
 split: 0.1
 ds_frac: 1.0
 ds_seed: 42
 seed: 42
 dropout: 0.0
-#clip: 0.0
+clip: 1.0
 #n_step_checkpoint: 20000
 #run_eval_loop: True
 #embedding: CN(new_allowed=True)  # None #{}
 num_mask: 4
 transform: "embedding" #False, "mix", or  "embedding"
-rotate: "all"
+rotate: ""
 embedding:
   pad_len: 128
   embedding_dim: 384
@@ -35,7 +35,7 @@ encoder:
   heads: 12  # num heads
   dim_head: 32  # heads * dim_head: intermediate size
   ff_mult: 4  # Feed forward multiplier
-  ema_decay: 0.996
+  ema_decay: 0.990
 predictor:
   transform: False
   hidden_size: 384  # hidden size

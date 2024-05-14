@@ -236,16 +236,17 @@ class HFEncoder(nn.Module):
     def forward(
             self,
             batch,
+            pbatch=None,
             #mask = None
     ):
-        #tokens = self.encoder(batch)
-        #input_ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
-        #if mask is not None:
-        #    masked_tokens = tokens[mask] #Skip the masked tokens
         tokens = self.model(input_ids = batch['input_ids'], attention_mask = batch['attention_mask']).last_hidden_state
-        #if mask is not None:
-        #    tokens[mask] = masked_tokens
-        return tokens
+        if pbatch:
+            pout = make_predictor_tokens(self.encoder,
+                                            transform=pbatch['transform'],
+                                            target_mask=pbatch['target_mask'])
+            return tokens, pout
+        else:
+            return tokens
 
 
 class CJPredictor(nn.Module):

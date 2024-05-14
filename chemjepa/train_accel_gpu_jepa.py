@@ -21,8 +21,8 @@ from accelerate import DistributedDataParallelKwargs
 from safetensors.torch import load_model
 torch.autograd.set_detect_anomaly(True)
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-#accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
-accelerator = Accelerator(log_with="wandb")
+accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
+#accelerator = Accelerator(log_with="wandb")
 
 config = training_config(sys.argv[1])
 
@@ -46,8 +46,8 @@ if model_config['encoder']['type']=='chemberta':
 else:
     xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 decay = model_config['encoder']['ema_decay']
-#yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
-yenc_model = xenc_model
+yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
+#yenc_model = xenc_model
 pred_model = CJPredictor(**model_config['predictor'])
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
@@ -137,13 +137,13 @@ for epoch in range(config.start_epoch,config.epochs):
                            xmask, batch['transform'])
             ymask = xmask
         else:
-            x = xenc_model(xbatch) #, xmask)
+            x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
             enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-            tokens, attention_mask = make_predictor_tokens(#xenc_model.module.encoder,
-                                                           xenc_model.encoder,
-                                                            transform=batch['transform'],
-                                                           target_mask=batch['target_mask'],
-                                                           )
+            #tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
+                                                           #xenc_model.encoder,
+            #                                                transform=batch['transform'],
+            #                                               target_mask=batch['target_mask'],
+            #                                               )
 
             x = torch.cat([x, tokens], dim=1)
             attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
@@ -169,7 +169,7 @@ for epoch in range(config.start_epoch,config.epochs):
 
         optimizer.step()
         lr_scheduler.step()
-        #yenc_model.module.update_parameters(xenc_model)
+        yenc_model.module.update_parameters(xenc_model)
         #yenc_model.update_parameters(xenc_model)
         # Log and checkpoint
         if idb % config.n_step_checkpoint == 0:
@@ -205,13 +205,13 @@ for epoch in range(config.start_epoch,config.epochs):
                     x = pred_model(x, batch['attention_mask'].to(torch.bool), xmask, batch['transform']) #Predictor get's all context but doesn't get masked toekn encoding
                     ymask = xmask
                 else:
-                    x = xenc_model(xbatch) #, xmask)
+                    x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
                     #Predictor needs embeddings token+position
-                    tokens, attention_mask = make_predictor_tokens(#xenc_model.module.encoder,
-                                                 xenc_model.encoder,
-                                                 transform = batch['transform'],
-                                                 target_mask = batch['target_mask'],
-                                                )
+                    #tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
+                    #                             #xenc_model.encoder,
+                    #                             transform = batch['transform'],
+                    #                             target_mask = batch['target_mask'],
+                    #                            )
                     x = torch.cat([x, tokens],dim=1)
                     attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
                     x = pred_model(x, attention_mask.to(torch.bool))

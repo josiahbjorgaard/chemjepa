@@ -6,6 +6,8 @@ from transformers import AutoConfig, AutoModel
 from einops import rearrange, repeat, pack, unpack
 #from collections import defaultdict
 from safetensors.torch import load_model
+#from transformers import AutoTokenizer
+#from functools import partial
 
 def default(*args):
     for arg in args:
@@ -185,6 +187,51 @@ class CJEncoder(nn.Module):
             tokens[mask] = masked_tokens
         return tokens
 
+
+class HFEncoder(nn.Module):
+    def __init__(
+            self,
+            load_weights = True,
+            model_path = "seyonec/PubChem10M_SMILES_BPE_450k",
+            freeze_layers = 6,
+            **kwargs
+            ):
+        super().__init__()
+        self.model_type = "PretrainedEncoder"
+        print(f"Got kwargs: {kwargs}")
+
+        #tokenizer = AutoTokenizer.from_pretrained(hf_path, max_len=512)
+        #self.encoder = partial(tokenizer, padding = 'max_length', truncation=True)
+
+        if load_weights:
+            model_config = AutoConfig.from_pretrained(model_path)
+            self.model = AutoModel.from_pretrained(model_path)
+        else:
+            print(f"WARNING: Not loading model weights")
+            model_config = AutoConfig.from_pretrained(model_path)
+            self.model = AutoModel.from_config(model_config)
+        if freeze_layers > 0:
+            print(f"Freezing {freeze_layers} layers")
+            modules_to_freeze = [self.model.embeddings,
+                                    self.model.encoder.layer[:freeze_layers]]
+            for module in modules_to_freeze:
+                for param in module.parameters():
+                    param.requires_grad = False
+    def forward(
+            self,
+            batch,
+            #mask = None
+    ):
+        #tokens = self.encoder(batch)
+        #input_ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
+        #if mask is not None:
+        #    masked_tokens = tokens[mask] #Skip the masked tokens
+        tokens = self.model(**batch).last_hidden_state
+        #if mask is not None:
+        #    tokens[mask] = masked_tokens
+        return tokens
+
+
 class CJPredictor(nn.Module):
     def __init__(
             self,
@@ -312,9 +359,6 @@ class PretrainedHFEncoder(nn.Module):
             embeddings = output
             output = embeddings[:,0,:]
         return output
-
-
-
 
 
 class PretrainedCJEncoder(nn.Module):

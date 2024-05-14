@@ -8,6 +8,8 @@ from utils.smiles import rotate_smiles, SmilesTransformations
 import functools
 import math
 from collections import defaultdict
+from transformers import AutoTokenizer
+from functools import partial
 
 def cum_mul(it):
     return functools.reduce(lambda x, y: x * y, it, 1)
@@ -140,9 +142,14 @@ class CJPreprocessCollator:
         self.rotate = rotate
         self.mask = mask
         self.max_length = max_length
-        self.tokenizer = SmilesTokenizer(vocab_file)
-        self.smiles_transform = SmilesTransformations(mask_size = num_mask, transform=transform)
-        self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
+        self.smiles_transform = SmilesTransformations(mask_size=num_mask, transform=transform)
+        if self.encoder == 'chemberta':
+            self.tokenizer = SmilesTokenizer(vocab_file)
+            self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
+            self.mask_token = 1 #Override mask token
+        else:
+            tokenizer = AutoTokenizer.from_pretrained("seyonec/PubChem10M_SMILES_BPE_450k", max_len=512)
+            self.tokenize = partial(tokenizer, padding = 'max_length', truncation=True)
 
     def __call__(self, batch):
         #print(batch)
@@ -192,11 +199,21 @@ class CJPreprocessCollator:
                 rsmiles.append(ts) #Unmasked target smiles
                 mrsmiles.append(tms) #Masked target smiles
                 res_rotate.append(rot)
+            if self.encoder == 'chemberta':
+                xsmiles = [s.replace('*','<mask>') for s in xsmiles]
+                rsmiles = [s.replace('*','<mask>') for s in rsmiles]
+                mrsmiles = [s.replace('*','<mask>') for s in mrsmiles]
             xbatch = self.tokenize(xsmiles) #For context encoder
             batch = self.tokenize(rsmiles) # For target encoder
             mbatch = self.tokenize(mrsmiles) #For mask for predictor
-            pxmask = mbatch['input_ids'] == 256 #Mask for predictor
-            xmask = xbatch['input_ids'] == 256 #Mask for context encoder
+            if self.encoder == "chemberta':
+                pxmask = mbatch['input_ids'] == 4 #Get mask tokens
+                xmask = xbatch['input_ids'] == 4
+                #mbatch['input_ids'][pxmask] = 1 #Change to padding token for encoder
+                #xbatch['input_ids'][xmask] = 1
+            else:
+                pxmask = mbatch['input_ids'] == 256 #Mask for predictor
+                xmask = xbatch['input_ids'] == 256 #Mask for context encoder
             #For new mask encodings, we need to set up the target mask positional
             # encodings + embeddings later. To do that we can use the pxmask
             # in the batch (target encoding) data
@@ -207,6 +224,7 @@ class CJPreprocessCollator:
             batch['transform'] = None
             xbatch=batch
         if self.mask:
+            ## Start old junk
             if not 'xmask' in locals():
                 #Masking tokens
                 token_counts = xbatch['attention_mask'].sum(dim=1)
@@ -220,6 +238,7 @@ class CJPreprocessCollator:
             if self.transform == "old":
                 for idx, (ixmask, irot) in enumerate(zip(xmask, rand_rotate)):
                     xbatch['input_ids'][idx, ixmask] = self.mask_token + irot
+            ## End old junk
             else:
                 xbatch['input_ids'][xmask] = self.mask_token
             xbatch['attention_mask'][xmask] = 0

@@ -131,7 +131,8 @@ class CJPreprocessCollator:
                  max_length=128,
                  stop_token=13,
                  mask_token=14,
-                 smiles_col="SMILES"
+                 smiles_col="SMILES",
+                 encoder = ""
                  ):
         super().__init__()
         self.smiles_col=smiles_col
@@ -143,6 +144,7 @@ class CJPreprocessCollator:
         self.mask = mask
         self.max_length = max_length
         self.smiles_transform = SmilesTransformations(mask_size=num_mask, transform=transform)
+        self.encoder = encoder
         if self.encoder == 'chemberta':
             self.tokenizer = SmilesTokenizer(vocab_file)
             self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)

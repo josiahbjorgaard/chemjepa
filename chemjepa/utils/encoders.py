@@ -145,13 +145,13 @@ class CJPreprocessCollator:
         self.max_length = max_length
         self.smiles_transform = SmilesTransformations(mask_size=num_mask, transform=transform)
         self.encoder = encoder
-        if self.encoder == 'chemberta':
+        if self.encoder != 'chemberta':
             self.tokenizer = SmilesTokenizer(vocab_file)
             self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
-            self.mask_token = 1 #Override mask token
         else:
-            tokenizer = AutoTokenizer.from_pretrained("seyonec/PubChem10M_SMILES_BPE_450k", max_len=512)
-            self.tokenize = partial(tokenizer, padding = 'max_length', truncation=True)
+            self.tokenizer = AutoTokenizer.from_pretrained("seyonec/PubChem10M_SMILES_BPE_450k", max_len=512, return_tensors='pt')
+            self.tokenize = partial(self.tokenizer, padding = 'max_length', truncation=True, return_tensors='pt')
+            self.mask_token = 1 #Override mask token
 
     def __call__(self, batch):
         #print(batch)
@@ -182,7 +182,6 @@ class CJPreprocessCollator:
         elif self.transform:
             #The new transform for smiles with matching mask tokens in transformations
             #N.B. the token for mask is 256 = '*' in this transformation
-            vocab_len = len(self.tokenizer.vocab)
             if self.rotate == "all":
                 rand_rotate_init = torch.randint(0, self.max_length, (len(smiles),))
                 rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
@@ -208,19 +207,21 @@ class CJPreprocessCollator:
             xbatch = self.tokenize(xsmiles) #For context encoder
             batch = self.tokenize(rsmiles) # For target encoder
             mbatch = self.tokenize(mrsmiles) #For mask for predictor
-            if self.encoder == "chemberta':
+            if self.encoder == 'chemberta':
                 pxmask = mbatch['input_ids'] == 4 #Get mask tokens
                 xmask = xbatch['input_ids'] == 4
                 #mbatch['input_ids'][pxmask] = 1 #Change to padding token for encoder
                 #xbatch['input_ids'][xmask] = 1
+                batch['transform'] = torch.LongTensor(res_rotate)
             else:
                 pxmask = mbatch['input_ids'] == 256 #Mask for predictor
                 xmask = xbatch['input_ids'] == 256 #Mask for context encoder
+                vocab_len = len(self.tokenizer.vocab)
+                batch['transform'] = torch.LongTensor(res_rotate) + vocab_len
             #For new mask encodings, we need to set up the target mask positional
             # encodings + embeddings later. To do that we can use the pxmask
             # in the batch (target encoding) data
             batch['target_mask'] = pxmask
-            batch['transform'] = torch.LongTensor(res_rotate) + vocab_len
         else:
             batch = self.tokenize(smiles)
             batch['transform'] = None

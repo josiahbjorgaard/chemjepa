@@ -53,6 +53,7 @@ def get_cfg_defaults_train():
     config.encoder.ff_mult = 4  # Feed forward multiplier
     config.encoder.ema_decay = 0.998
     config.encoder.freeze_layers = 0
+    config.encoder.type = ""
     config.predictor = CN(new_allowed=True)  # None #{}
     config.predictor.hidden_size = 384  # hidden size
     config.predictor.layers = 12  # layers

@@ -46,7 +46,8 @@ if model_config['encoder']['type']=='chemberta':
 else:
     xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 decay = model_config['encoder']['ema_decay']
-yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
+#yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
+yenc_model = xenc_model
 pred_model = CJPredictor(**model_config['predictor'])
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
@@ -64,7 +65,8 @@ accelerator.init_trackers(
 
 preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
         transform = config.transform,
-        rotate = config.rotate)
+        rotate = config.rotate,
+        encoder = config.encoder.type)
 
 # Creating a DataLoader object for iterating over it during the training epochs
 train_dl = DataLoader( datasets["train"], batch_size=config.batch_size,
@@ -137,8 +139,9 @@ for epoch in range(config.start_epoch,config.epochs):
         else:
             x = xenc_model(xbatch) #, xmask)
             enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-            tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
-                                                           transform=batch['transform'],
+            tokens, attention_mask = make_predictor_tokens(#xenc_model.module.encoder,
+                                                           xenc_model.encoder,
+                                                            transform=batch['transform'],
                                                            target_mask=batch['target_mask'],
                                                            )
 
@@ -158,8 +161,6 @@ for epoch in range(config.start_epoch,config.epochs):
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
             y_var = torch.var(y, dim=0).mean().cpu()
-        #print(x[xmask].shape)
-        #print(y[ymask].shape)
         loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)
@@ -168,7 +169,7 @@ for epoch in range(config.start_epoch,config.epochs):
 
         optimizer.step()
         lr_scheduler.step()
-        yenc_model.module.update_parameters(xenc_model)
+        #yenc_model.module.update_parameters(xenc_model)
         #yenc_model.update_parameters(xenc_model)
         # Log and checkpoint
         if idb % config.n_step_checkpoint == 0:
@@ -206,7 +207,8 @@ for epoch in range(config.start_epoch,config.epochs):
                 else:
                     x = xenc_model(xbatch) #, xmask)
                     #Predictor needs embeddings token+position
-                    tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
+                    tokens, attention_mask = make_predictor_tokens(#xenc_model.module.encoder,
+                                                 xenc_model.encoder,
                                                  transform = batch['transform'],
                                                  target_mask = batch['target_mask'],
                                                 )

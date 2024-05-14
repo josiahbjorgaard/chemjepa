@@ -199,7 +199,7 @@ class HFEncoder(nn.Module):
         super().__init__()
         self.model_type = "PretrainedEncoder"
         print(f"Got kwargs: {kwargs}")
-
+        
         #tokenizer = AutoTokenizer.from_pretrained(hf_path, max_len=512)
         #self.encoder = partial(tokenizer, padding = 'max_length', truncation=True)
 
@@ -217,6 +217,22 @@ class HFEncoder(nn.Module):
             for module in modules_to_freeze:
                 for param in module.parameters():
                     param.requires_grad = False
+        print(self.model)
+        self.transform_encoder =  MLP(768, 1, 768, 1)
+        
+    def encoder(self,
+            x):
+        padding_idx = 1
+        x['input_ids'][:,0]=1
+        x['input_ids'][:,-1]=1
+        mask = x['input_ids'].ne(padding_idx).int()
+        incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask
+        encs =  incremental_indices.long() + padding_idx
+        encs = self.model.embeddings.position_embeddings(encs)
+        tres = x['input_ids'][:,0].unsqueeze(1).float()
+        trns = self.transform_encoder(tres).unsqueeze(1).repeat(1,512,1)
+        return trns + encs, x['attention_mask']
+    
     def forward(
             self,
             batch,
@@ -226,7 +242,7 @@ class HFEncoder(nn.Module):
         #input_ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
         #if mask is not None:
         #    masked_tokens = tokens[mask] #Skip the masked tokens
-        tokens = self.model(**batch).last_hidden_state
+        tokens = self.model(input_ids = batch['input_ids'], attention_mask = batch['attention_mask']).last_hidden_state
         #if mask is not None:
         #    tokens[mask] = masked_tokens
         return tokens

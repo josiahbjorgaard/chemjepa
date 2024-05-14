@@ -389,7 +389,10 @@ class PretrainedCJEncoder(nn.Module):
         super().__init__()
         self.run_predictor = run_predictor
         self.class_token_predictor = class_token_predictor
-        self.encoder = CJEncoder(embedding_config,**encoder_config)
+        if encoder_config['type'] == 'chemberta':
+            self.encoder = HFEncoder(**encoder_config, embedding_config=embedding_config)
+        else:
+            self.encoder = CJEncoder(**encoder_config, embedding_config=embedding_config)
         self.dim = encoder_config['hidden_size']
         if 'weights' in encoder_config:
             load_model(self.encoder, encoder_config['weights'])
@@ -399,8 +402,13 @@ class PretrainedCJEncoder(nn.Module):
 
         if encoder_config['freeze_layers'] > 0:
             print(f"Freezing {encoder_config['freeze_layers']} encoder layers")
-            modules_to_freeze = [self.encoder.encoder,
-                                    self.encoder.layers[:encoder_config['freeze_layers']]]
+            if encoder_config['type'] == 'chemberta':
+                modules_to_freeze = [self.encoder.model.embeddings,
+                                     self.encoder.transform_encoder,
+                                     self.encoder.model.encoder.layer[:freeze_layers]]
+            else:
+                modules_to_freeze = [self.encoder.encoder,
+                                        self.encoder.layers[:encoder_config['freeze_layers']]]
             for module in modules_to_freeze:
                 for param in module.parameters():
                     param.requires_grad = False
@@ -416,26 +424,24 @@ class PretrainedCJEncoder(nn.Module):
         raise NotImplementedError
         #return
     def forward(self, batch):
-        output = self.encoder(batch)
+        #output = self.encoder(batch)
+        transform = torch.zeros(batch['input_ids'].shape[0],
+                                device=batch['input_ids'].device,
+                                dtype=torch.long)
+        if self.pooling_type == "first":
+            target_mask = torch.ones([batch['input_ids'].shape[0], 1],
+                                     device=batch['input_ids'].device,
+                                     dtype=torch.long)
+        else:  # self.pooling_type == "augmented":
+            target_mask = batch['attention_mask']
+
+        output, (x, a) = self.encoder(batch, {'transform': transform,
+                                            'attention_mask': target_mask})
         if self.run_predictor:
             if self.class_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
                 #assert self.pooling_type == 'first'
                 #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
                 n_init = batch['input_ids'].shape[1]
-                transform = torch.zeros(batch['input_ids'].shape[0],
-                        device=batch['input_ids'].device,
-                        dtype=torch.long)
-                if self.pooling_type == "first":
-                    target_mask = torch.ones([batch['input_ids'].shape[0],1], 
-                            device=batch['input_ids'].device,
-                            dtype=torch.long)
-                else: # self.pooling_type == "augmented":
-                    target_mask = batch['attention_mask']
-                
-                x, a = make_predictor_tokens(self.encoder.encoder,
-                                             transform,
-                                             target_mask,
-                                             )
                 output = torch.cat([x, output], dim=1)
                 batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
             output = self.predictor(output,
@@ -472,6 +478,11 @@ class FineTuneModel(nn.Module):
                                             pooling_type=decoder_config.pooling_type,
                                             class_token_predictor = predictor_config['fine_tune_with_class_token']
                                             )
+
+        if model_config['encoder']['type'] == 'chemberta':
+            xenc_model = HFEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+        else:
+            xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 
         if decoder_config.type == "MLP":
             self.decoder_type = "MLP"

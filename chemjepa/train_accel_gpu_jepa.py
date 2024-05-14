@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, CJPredictor, make_predictor_tokens
+from model import CJEncoder, HFEncoder, CJPredictor, make_predictor_tokens
 from utils.encoders import CJPreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
@@ -41,7 +41,10 @@ model_config = get_model_config(config)
 device = accelerator.device
 
 # Model
-xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+if model_config['encoder']['type']=='chemberta':
+    xenc_model = HFEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+else:
+    xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 pred_model = CJPredictor(**model_config['predictor'])

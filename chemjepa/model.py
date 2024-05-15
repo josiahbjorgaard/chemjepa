@@ -479,11 +479,6 @@ class FineTuneModel(nn.Module):
                                             class_token_predictor = predictor_config['fine_tune_with_class_token']
                                             )
 
-        if encoder_config['type'] == 'chemberta':
-            xenc_model = HFEncoder(**encoder_config, embedding_config=embedding_config)
-        else:
-            xenc_model = CJEncoder(**encoder_config, embedding_config=embedding_config)
-
         if decoder_config.type == "MLP":
             self.decoder_type = "MLP"
             self.decoder = MLP(**decoder_config)

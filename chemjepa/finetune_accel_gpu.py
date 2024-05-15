@@ -49,7 +49,8 @@ model = FineTuneModel( config.run_predictor,
 preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
         transform = config.transform,
         rotate = config.rotate,
-        smiles_col = config.smiles_col)
+        smiles_col = config.smiles_col,
+        encoder = config.encoder.type)
 
 config.n_params_emb, config.n_params_nonemb = count_parameters(model, print_summary=False)
 

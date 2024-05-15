@@ -405,7 +405,7 @@ class PretrainedCJEncoder(nn.Module):
             if encoder_config['type'] == 'chemberta':
                 modules_to_freeze = [self.encoder.model.embeddings,
                                      self.encoder.transform_encoder,
-                                     self.encoder.model.encoder.layer[:freeze_layers]]
+                                     self.encoder.model.encoder.layer[:predictor_config['freeze_layers']]]
             else:
                 modules_to_freeze = [self.encoder.encoder,
                                         self.encoder.layers[:encoder_config['freeze_layers']]]
@@ -436,7 +436,7 @@ class PretrainedCJEncoder(nn.Module):
             target_mask = batch['attention_mask']
 
         output, (x, a) = self.encoder(batch, {'transform': transform,
-                                            'attention_mask': target_mask})
+                                            'target_mask': target_mask})
         if self.run_predictor:
             if self.class_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
                 #assert self.pooling_type == 'first'
@@ -479,10 +479,10 @@ class FineTuneModel(nn.Module):
                                             class_token_predictor = predictor_config['fine_tune_with_class_token']
                                             )
 
-        if model_config['encoder']['type'] == 'chemberta':
-            xenc_model = HFEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+        if encoder_config['type'] == 'chemberta':
+            xenc_model = HFEncoder(**encoder_config, embedding_config=embedding_config)
         else:
-            xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+            xenc_model = CJEncoder(**encoder_config, embedding_config=embedding_config)
 
         if decoder_config.type == "MLP":
             self.decoder_type = "MLP"

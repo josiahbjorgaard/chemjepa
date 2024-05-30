@@ -172,8 +172,8 @@ for epoch in range(config.start_epoch,config.epochs):
         yenc_model.module.update_parameters(xenc_model)
         #yenc_model.update_parameters(xenc_model)
         # Log and checkpoint
-        if idb % config.n_step_checkpoint == 0:
-            accelerator.save_state(config.output_dir)
+        #if idb % config.n_step_checkpoint == 0:
+            #accelerator.save_state(config.output_dir)
         if accelerator.is_main_process:
             progress_bar.update(world_size)
 
@@ -187,8 +187,8 @@ for epoch in range(config.start_epoch,config.epochs):
                          "pred_grad_norm": get_grad_norm(pred_model).to("cpu"),
                          "lr": optimizer.param_groups[0]['lr']})
     #Epoch end log and checkpoint
-    os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
-    accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
+    #os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
+    #accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
     #Eval looop
     if config.run_eval_loop:
         xenc_model.eval()

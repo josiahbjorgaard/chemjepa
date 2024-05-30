@@ -129,35 +129,21 @@ for epoch in range(config.start_epoch,config.epochs):
         batch, xbatch, xmask, _ = batch #preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
-        # Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
-        if config.transform == 'old':
-            x = xenc_model(xbatch, xmask)
-            #Predictor get's all context but doesn't get masked toekn encoding
-            x = pred_model(x, batch['attention_mask'].to(torch.bool),
-                           xmask, batch['transform'])
-            ymask = xmask
-        else:
-            x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
-            enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-            #tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
-                                                           #xenc_model.encoder,
-            #                                                transform=batch['transform'],
-            #                                               target_mask=batch['target_mask'],
-            #                                               )
-
-            x = torch.cat([x, tokens], dim=1)
-            attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
-            if (~torch.isfinite(attention_mask)).sum():
-                print(attention_mask)
-                raise Exception('Nan value in mask')
-            elif (~torch.isfinite(x)).sum():
-                print(x)
-                raise Exception("Nan value in x")
-            x = pred_model(x, attention_mask.to(torch.bool))
-            pred_var = torch.var(x.detach(), dim=0).mean().cpu()
-            xmask = attention_mask == 2
-            ymask = batch['target_mask']
-            
+        x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
+        enc_var = torch.var(x.detach(), dim=0).mean().cpu()
+        x = torch.cat([x, tokens], dim=1)
+        attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
+        if (~torch.isfinite(attention_mask)).sum():
+            print(attention_mask)
+            raise Exception('Nan value in mask')
+        elif (~torch.isfinite(x)).sum():
+            print(x)
+            raise Exception("Nan value in x")
+        x = pred_model(x, attention_mask.to(torch.bool))
+        pred_var = torch.var(x.detach(), dim=0).mean().cpu()
+        xmask = attention_mask == 2
+        ymask = batch['target_mask']
+        
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
             y_var = torch.var(y, dim=0).mean().cpu()
@@ -200,23 +186,12 @@ for epoch in range(config.start_epoch,config.epochs):
                 batch, xbatch, xmask, _ = batch
                 batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
                 # Training
-                if config.transform == 'old':
-                    x = xenc_model(xbatch, xmask) #Encoder doesn't get context on masked tokens, but encodes them with position and skips them to output
-                    x = pred_model(x, batch['attention_mask'].to(torch.bool), xmask, batch['transform']) #Predictor get's all context but doesn't get masked toekn encoding
-                    ymask = xmask
-                else:
-                    x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
-                    #Predictor needs embeddings token+position
-                    #tokens, attention_mask = make_predictor_tokens(xenc_model.module.encoder,
-                    #                             #xenc_model.encoder,
-                    #                             transform = batch['transform'],
-                    #                             target_mask = batch['target_mask'],
-                    #                            )
-                    x = torch.cat([x, tokens],dim=1)
-                    attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
-                    x = pred_model(x, attention_mask.to(torch.bool))
-                    xmask = attention_mask == 2
-                    ymask = batch['target_mask']
+                x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
+                x = torch.cat([x, tokens],dim=1)
+                attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
+                x = pred_model(x, attention_mask.to(torch.bool))
+                xmask = attention_mask == 2
+                ymask = batch['target_mask']
                 y = yenc_model(batch) #Target Encoder gets all context and all tokens
                 loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
 

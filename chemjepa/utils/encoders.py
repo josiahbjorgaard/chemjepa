@@ -186,12 +186,13 @@ class CJPreprocessCollator:
             batch = self.tokenize(rsmiles) # For target encoder
             mbatch = self.tokenize(mrsmiles) #For mask for predictor
             if self.rotate == 'flip': #Hack to flip in order to test
-                rand_flip_init = torch.randint(0, 1, (len(smiles),))
+                rand_flip_init = torch.randint(0, 2, (len(smiles),))
                 res_rotate = torch.LongTensor(rand_flip_init)
                 for idx, flip in enumerate(rand_flip_init):
                     if flip:
-                        toks = torch.flip(xbatch['input_ids'][idx, xbatch['attention_mask']])
-                        xbatch['input_ids'][idx, xbatch['attention_mask']] = toks
+                        t,a = xbatch['input_ids'][idx],xbatch['attention_mask'][idx]
+                        toks = torch.flip(t, dims=[0])
+                        xbatch['input_ids'][idx] = toks
             if self.encoder == 'chemberta':
                 pxmask = mbatch['input_ids'] == 4 #Get mask tokens
                 xmask = xbatch['input_ids'] == 4

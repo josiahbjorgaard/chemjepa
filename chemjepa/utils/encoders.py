@@ -157,29 +157,7 @@ class CJPreprocessCollator:
         #print(batch)
         smiles = [x[self.smiles_col] for x in batch]
         metadata = {k:[x[k] for x in batch] for k in batch[0].keys()}
-        if self.transform == "old":
-            vocab_len = len(self.tokenizer.vocab)
-            #First rotate to a context state. This one gets masked.
-            rand_rotate = torch.randint(0, self.max_length, (len(smiles),))
-            xsmiles = [rotate_smiles(smile, rot) for smile, rot in zip(smiles, rand_rotate)]
-            rand_rotate = [rot if smi else 0 for smi, rot in zip(xsmiles, rand_rotate)]
-            xsmiles = [xsmi if xsmi else smi for xsmi, smi in zip(xsmiles, smiles)]
-            xbatch = self.tokenize(xsmiles) #batch['input_ids'], batch['attention_mask']
-            #marker_tokens = (xbatch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-            #No token for this
-            #for idx, rot in zip(marker_tokens,rand_rotate):
-            #    xbatch['input_ids'][idx] = vocab_len+1
-
-            #Rotate from the prediction state to get a target state
-            rand_rotate = torch.randint(0,self.max_length, (len(xsmiles),))
-            nsmiles = [rotate_smiles(xsmile, rot) for xsmile, rot in zip(xsmiles, rand_rotate)]
-            smiles = [n if n else s for s,n in zip(xsmiles,nsmiles)]
-            batch = self.tokenize(smiles) #batch['input_ids'], batch['attention_mask']
-            #marker_tokens = (batch['input_ids'] == self.stop_token).nonzero(as_tuple=True)
-
-            #Add info for transformation
-            batch['transform'] = rand_rotate
-        elif self.transform:
+        if self.transform:
             #The new transform for smiles with matching mask tokens in transformations
             #N.B. the token for mask is 256 = '*' in this transformation
             if self.rotate == "all":
@@ -207,11 +185,16 @@ class CJPreprocessCollator:
             xbatch = self.tokenize(xsmiles) #For context encoder
             batch = self.tokenize(rsmiles) # For target encoder
             mbatch = self.tokenize(mrsmiles) #For mask for predictor
+            if self.rotate == 'flip': #Hack to flip in order to test
+                rand_flip_init = torch.randint(0, 1, (len(smiles),))
+                res_rotate = torch.LongTensor(rand_flip_init)
+                for idx, flip in enumerate(rand_flip_init):
+                    if flip:
+                        toks = torch.flip(xbatch['input_ids'][idx, xbatch['attention_mask']])
+                        xbatch['input_ids'][idx, xbatch['attention_mask']] = toks
             if self.encoder == 'chemberta':
                 pxmask = mbatch['input_ids'] == 4 #Get mask tokens
                 xmask = xbatch['input_ids'] == 4
-                #mbatch['input_ids'][pxmask] = 1 #Change to padding token for encoder
-                #xbatch['input_ids'][xmask] = 1
                 batch['transform'] = torch.LongTensor(res_rotate)
             else:
                 pxmask = mbatch['input_ids'] == 256 #Mask for predictor
@@ -227,23 +210,7 @@ class CJPreprocessCollator:
             batch['transform'] = None
             xbatch=batch
         if self.mask:
-            ## Start old junk
-            if not 'xmask' in locals():
-                #Masking tokens
-                token_counts = xbatch['attention_mask'].sum(dim=1)
-                #Probably a faster way of doing this
-                ntok = xbatch['input_ids'].shape[1]
-                xmask = torch.stack([
-                    torch.zeros(ntok, device=xbatch['input_ids'].device).index_fill_(0,
-                                                torch.randperm(c, device=xbatch['input_ids'].device)[:self.mask_size],
-                                                1)
-                         for c in token_counts]).to(torch.bool)
-            if self.transform == "old":
-                for idx, (ixmask, irot) in enumerate(zip(xmask, rand_rotate)):
-                    xbatch['input_ids'][idx, ixmask] = self.mask_token + irot
-            ## End old junk
-            else:
-                xbatch['input_ids'][xmask] = self.mask_token
+            xbatch['input_ids'][xmask] = self.mask_token
             xbatch['attention_mask'][xmask] = 0
         else:
             return dict(batch)

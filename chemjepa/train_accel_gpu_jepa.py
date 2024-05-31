@@ -129,7 +129,7 @@ for epoch in range(config.start_epoch,config.epochs):
         batch, xbatch, xmask, _ = batch #preprocessing(batch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
-        x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
+        x, (tokens, attention_mask) = xenc_model(xbatch, batch) #(tokens, attention_mask) are the prediction tokens
         enc_var = torch.var(x.detach(), dim=0).mean().cpu()
         x = torch.cat([x, tokens], dim=1)
         attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)

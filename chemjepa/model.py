@@ -18,19 +18,6 @@ def default(*args):
 def exists(val):
     return val is not None
 
-def make_predictor_tokens(encoder, transform, target_mask):
-    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, target_mask.shape[1]),
-                          'attention_mask': target_mask}
-    ptokens, pattention_mask = encoder(target_token_batch)
-    #Now we need to select just the tokens for prediction and append them
-    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)]
-    max_len = max([t.shape[0] for t in ptokens])
-    ptokens = [F.pad(t, [0, 0, 0, max_len-t.shape[0]], value=float('nan')) for t in ptokens]
-    ptokens = torch.stack(ptokens)
-    pattention_mask = (~ptokens[:,:,0].isnan()).to(torch.long)
-    ptokens = torch.nan_to_num(ptokens, 0.0)
-    return ptokens, pattention_mask
-
 # bias-less layernorm
 class LayerNorm(nn.Module):
     def __init__(self, dim):
@@ -188,6 +175,26 @@ class CJEncoder(nn.Module):
         return tokens
 
 
+def make_predictor_tokens(encoder, transform, target_mask):
+    """
+
+    :param encoder: function which encodes input_ids (These are the transform)
+    :param transform:  the transform tokens
+    :param target_mask: the attention mask that corresponds to the masked tokens (for PE)
+    :return: tokens, attention mask such that tokens[attention_mask] are the embedded masked tokens for prediction
+    """
+    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, target_mask.shape[1]),
+                          'attention_mask': target_mask}
+    ptokens, pattention_mask = encoder(target_token_batch)
+    # Now we need to select just the tokens for prediction and append them
+    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)]
+    max_len = max([t.shape[0] for t in ptokens])
+    ptokens = [F.pad(t, [0, 0, 0, max_len - t.shape[0]], value=float('nan')) for t in ptokens]
+    ptokens = torch.stack(ptokens)
+    pattention_mask = (~ptokens[:, :, 0].isnan()).to(torch.long)
+    ptokens = torch.nan_to_num(ptokens, 0.0)
+    return ptokens, pattention_mask
+
 class HFEncoder(nn.Module):
     def __init__(
             self,
@@ -222,16 +229,21 @@ class HFEncoder(nn.Module):
         
     def encoder(self,
             x):
+        """
+        Take input_ids/attention mask for mask tokens (where input_ids are mask tokens and attention mask is the location of mask tokens)
+        :param x:
+        :return: Encoding of the mask tokens with the same attention mask
+        """
         padding_idx = 1
-        x['input_ids'][:,0]=1
-        x['input_ids'][:,-1]=1
-        mask = x['input_ids'].ne(padding_idx).int()
-        incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask
-        encs =  incremental_indices.long() + padding_idx
-        encs = self.model.embeddings.position_embeddings(encs)
-        tres = x['input_ids'][:,0].unsqueeze(1).float()
-        trns = self.transform_encoder(tres).unsqueeze(1).repeat(1,512,1)
-        return trns + encs, x['attention_mask']
+        x['input_ids'][:, 0] = 1 #For some reason, make the 0eth token 1?
+        x['input_ids'][:, -1] = 1 #For some reason make the last token 1?
+        mask = x['input_ids'].ne(padding_idx).int() #Input ids that aren't the padding token are good...
+        incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask #Create the number of the indices
+        encs = incremental_indices.long() + padding_idx #Some number for the position embedding - which is +1 b/c that's how BERTa does it
+        encs = self.model.embeddings.position_embeddings(encs) #Position embeddings
+        tres = x['input_ids'][:, 1].unsqueeze(1).float() #This must be the transform token or signal
+        trns = self.transform_encoder(tres).unsqueeze(1).repeat(1, 512, 1) #This encodes the transform and repeats it for all tokens...
+        return trns + encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
     
     def forward(
             self,

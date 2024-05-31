@@ -187,7 +187,7 @@ def make_predictor_tokens(encoder, transform, target_mask):
                           'attention_mask': target_mask}
     ptokens, pattention_mask = encoder(target_token_batch)
     # Now we need to select just the tokens for prediction and append them
-    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)]
+    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)] #Should check that these are being selected correctly...
     max_len = max([t.shape[0] for t in ptokens])
     ptokens = [F.pad(t, [0, 0, 0, max_len - t.shape[0]], value=float('nan')) for t in ptokens]
     ptokens = torch.stack(ptokens)

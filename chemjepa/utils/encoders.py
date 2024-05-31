@@ -191,7 +191,7 @@ class CJPreprocessCollator:
                 for idx, flip in enumerate(rand_flip_init):
                     if flip:
                         t,a = xbatch['input_ids'][idx],xbatch['attention_mask'][idx]
-                        toks = torch.flip(t, dims=[0])
+                        toks = t #torch.flip(t, dims=[0])
                         xbatch['input_ids'][idx] = toks
             if self.encoder == 'chemberta':
                 pxmask = mbatch['input_ids'] == 4 #Get mask tokens

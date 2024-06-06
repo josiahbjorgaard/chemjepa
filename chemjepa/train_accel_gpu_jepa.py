@@ -86,7 +86,7 @@ accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
 num_training_steps = config.epochs * len(train_dl)
 
-optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr, weight_decay = config.weight_decay)
+optimizer = AdamW(nn.ModuleList([xenc_model,pred_model]).parameters(), lr=config.lr) #, weight_decay = config.weight_decay)
 lr_scheduler = get_scheduler(
         name=config.lr_scheduler_type,
         optimizer=optimizer,
@@ -133,17 +133,27 @@ for epoch in range(config.start_epoch, config.epochs):
         # Mutation and masking function here
         batch, xbatch, _, _ = batch #batch - all data the targets, xbatch - context data only (transformed potentially), xmask - tokens to predict (not in xbatch)
         batch, xbatch = move_to(batch, device), move_to(xbatch, device)
-
+        diffbatch = batch['input_ids'][(batch['input_ids'] != xbatch['input_ids']).to(torch.bool)].shape
+        diffmask = batch['attention_mask'][(batch['attention_mask'] != xbatch['attention_mask']).to(torch.bool)].shape
+        #print(batch['input_ids'][:,-10:])
+        print(batch['target_mask'].sum())
+        print(diffbatch)
+        print(diffmask)
+        print(batch['input_ids'][1,:10])
+        print(xbatch['input_ids'][1,:10])
         # Training
         x = xenc_model(xbatch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
         enc_var = torch.var(x.detach(), dim=0).mean().cpu()
+        enc_mean = x.detach().mean().cpu()
         y_var = torch.var(y.detach(), dim=0).mean().cpu()
+        y_mean = y.detach().mean().cpu()
         x, pattention_mask, xmask = ptform({'input_ids': x,
                          'attention_mask': xbatch['attention_mask']}, batch)
         x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
         pred_var = torch.var(x.detach(), dim=0).mean().cpu()
+        pred_mean = x.detach().mean().cpu()
         ymask = batch['target_mask'] # target mask tokens for the true values
         loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
         optimizer.zero_grad()
@@ -165,6 +175,9 @@ for epoch in range(config.start_epoch, config.epochs):
                          "xenc_var": enc_var,
                          "pred_var": pred_var,
                          "yenc_var": y_var,
+                         'xenc_mean': enc_mean,
+                         'pred_mean': pred_mean,
+                         'yenc_mean': y_mean,
                          "xenc_param_norm": get_param_norm(xenc_model).to("cpu"),
                          "xenc_grad_norm": get_grad_norm(xenc_model).to("cpu"),
                          "pred_param_norm": get_param_norm(pred_model).to("cpu"),
@@ -174,7 +187,7 @@ for epoch in range(config.start_epoch, config.epochs):
     #os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
     #accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
     #Eval looop
-    if config.run_eval_loop:
+    if False: #config.run_eval_loop:
         xenc_model.eval()
         pred_model.eval()
         ptform.eval()

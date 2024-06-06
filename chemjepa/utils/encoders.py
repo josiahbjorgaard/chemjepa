@@ -10,6 +10,7 @@ import math
 from collections import defaultdict
 from transformers import AutoTokenizer
 from functools import partial
+import random
 
 def cum_mul(it):
     return functools.reduce(lambda x, y: x * y, it, 1)
@@ -203,6 +204,76 @@ class CJPreprocessCollator:
                 xmask = xbatch['input_ids'] == 256 #Mask for context encoder
                 vocab_len = len(self.tokenizer.vocab)
                 batch['transform'] = torch.LongTensor(res_rotate) + vocab_len
+            #For new mask encodings, we need to set up the target mask positional
+            # encodings + embeddings later. To do that we can use the pxmask
+            # in the batch (target encoding) data
+            batch['target_mask'] = pxmask
+        else:
+            batch = self.tokenize(smiles)
+            batch['transform'] = None
+            xbatch=batch
+        if self.mask:
+            xbatch['input_ids'][xmask] = self.mask_token
+            xbatch['attention_mask'][xmask] = 0
+        else:
+            return dict(batch)
+        return dict(batch), dict(xbatch), xmask, metadata
+
+
+class CJSimplePreprocessCollator:
+    def __init__(self,
+                 num_mask=4,
+                 transform=None,
+                 mask=True,
+                 rotate = "all",
+                 vocab_file='../data/vocab.txt',
+                 max_length=128,
+                 stop_token=13,
+                 mask_token=14,
+                 smiles_col="SMILES",
+                 encoder = ""
+                 ):
+        super().__init__()
+        self.smiles_col=smiles_col
+        self.mask_size = num_mask
+        self.mask_token = mask_token
+        self.stop_token = stop_token
+        self.transform = transform
+        self.rotate = rotate
+        self.mask = mask
+        self.max_length = max_length
+        self.encoder = encoder
+        if self.encoder != 'chemberta':
+            self.tokenizer = SmilesTokenizer(vocab_file)
+            self.tokenize = lambda x: self.tokenizer(x, max_length=max_length, padding="max_length", return_tensors='pt', truncation=True)
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained("seyonec/PubChem10M_SMILES_BPE_450k", max_len=512, return_tensors='pt')
+            self.tokenize = partial(self.tokenizer, padding = 'max_length', truncation=True, return_tensors='pt')
+            self.mask_token = 1 #Override mask token
+
+    def __call__(self, batch):
+        smiles = [x[self.smiles_col] for x in batch]
+        metadata = {k:[x[k] for x in batch] for k in batch[0].keys()}
+        if self.transform:
+            batch = self.tokenize(smiles) #For context encoder
+            xbatch = batch
+            for idx, row in enumerate(xbatch['attention_mask']):
+                max_len = row.sum()
+                print(max_len)
+                seed = random.randint(1, max_len-self.mask_size-1)
+                xbatch['input_ids'][idx,seed:seed+self.mask_size] = 4
+            if self.rotate == 'flip': #Hack to flip in order to test
+                #rand_flip_init = torch.randint(0, 2, (len(smiles),))
+                rand_flip_init = torch.randint(1, 2, (len(smiles),))
+                res_rotate = torch.LongTensor(rand_flip_init)
+                for idx, flip in enumerate(rand_flip_init):
+                    if False: #flip:
+                        t,a = xbatch['input_ids'][idx],xbatch['attention_mask'][idx]
+                        toks = t #torch.flip(t, dims=[0])
+                        xbatch['input_ids'][idx] = toks
+            pxmask = mbatch['input_ids'] == 4 #Get mask tokens for ChemBERTa only here
+            xmask = xbatch['input_ids'] == 4
+            batch['transform'] = torch.zeros(batch['input_ids'].shape[0])
             #For new mask encodings, we need to set up the target mask positional
             # encodings + embeddings later. To do that we can use the pxmask
             # in the batch (target encoding) data

@@ -10,7 +10,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
 from model import CJEncoder, HFEncoder, CJPredictor, PredictorTokenTransform
-from utils.encoders import CJPreprocessCollator
+from utils.encoders import CJPreprocessCollator, CJSimplePreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
@@ -65,7 +65,7 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
-preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
+preprocessing_collator = CJSimplePreprocessCollator(num_mask = config.num_mask,
         transform = config.transform,
         rotate = config.rotate,
         encoder = config.encoder.type)

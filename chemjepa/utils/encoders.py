@@ -187,10 +187,10 @@ class CJPreprocessCollator:
             mbatch = self.tokenize(mrsmiles) #For mask for predictor
             if self.rotate == 'flip': #Hack to flip in order to test
                 #rand_flip_init = torch.randint(0, 2, (len(smiles),))
-                rand_flip_init = torch.randint(0, 1, (len(smiles),))
+                rand_flip_init = torch.randint(1, 2, (len(smiles),))
                 res_rotate = torch.LongTensor(rand_flip_init)
                 for idx, flip in enumerate(rand_flip_init):
-                    if flip:
+                    if False: #flip:
                         t,a = xbatch['input_ids'][idx],xbatch['attention_mask'][idx]
                         toks = t #torch.flip(t, dims=[0])
                         xbatch['input_ids'][idx] = toks

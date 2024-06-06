@@ -225,8 +225,9 @@ class HFEncoder(nn.Module):
                 for param in module.parameters():
                     param.requires_grad = False
         print(self.model)
-        self.transform_encoder =  MLP(768, 1, 768, 1)
-        
+        self.transform_mlp =  MLP(768,1,768*2,2, dropout=0.0) #MLP(768, 1, 768, 1)
+        #self.transform_encoder = nn.Embedding(2,768)
+
     def encoder(self,
             x):
         """
@@ -241,9 +242,13 @@ class HFEncoder(nn.Module):
         incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask #Create the number of the indices
         encs = incremental_indices.long() + padding_idx #Some number for the position embedding - which is +1 b/c that's how BERTa does it
         encs = self.model.embeddings.position_embeddings(encs) #Position embeddings
-        tres = x['input_ids'][:, 1].unsqueeze(1).float() #This must be the transform token or signal, which is repeated in all but first and last token...
-        trns = self.transform_encoder(tres).unsqueeze(1).repeat(1, 512, 1) #This encodes the transform and repeats it for all tokens...
-        return trns + encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
+        tres = x['input_ids'][:, 1]#.unsqueeze(1).float() #This must be the transform token or signal, which is repeated in all but first and last token...
+        #trns = self.transform_encoder(tres)#.unsqueeze(1).repeat(1, 512, 1) #This encodes the transform and repeats it for all tokens...
+        trns2 = self.transform_mlp(torch.zeros_like(tres.unsqueeze(1), dtype=torch.float)).unsqueeze(1).repeat(1,512,1)
+        #encs[:, 0, :] = trns
+        #x['attention_mask'][:, 0] = 1
+        return trns2 + encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
+        #return encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
     
     def forward(
             self,
@@ -310,7 +315,7 @@ class CJPredictor(nn.Module):
 
 
 class MLP(torch.nn.Module):
-    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.1, **kwargs ):
+    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.0, **kwargs ):
         super().__init__()
         self.model_type = "MLP"
         self.dropout = nn.Dropout(dropout)

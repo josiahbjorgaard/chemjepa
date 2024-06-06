@@ -129,15 +129,17 @@ for epoch in range(config.start_epoch,config.epochs):
         batch, xbatch, xmask, _ = batch #batch - all data the targets, xbatch - context data only (transformed potentially), xmask - tokens to predict (not in xbatch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
         # Training
+        print(f"Before: {batch['input_ids'][:,0]}")
         x, (tokens, attention_mask) = xenc_model(xbatch, batch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
+        print(f"After: {batch['input_ids'][:,0]}")
         enc_var = torch.var(x.detach(), dim=0).mean().cpu()
         x = torch.cat([x, tokens], dim=1)
         attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1) # attention mask == 2 now is for the tokens to predict
+        #attention_mask[:, xbatch['attention_mask'].shape[1]] = 1 #Fix the tranform token to not be a mask token
         x = pred_model(x, attention_mask.to(torch.bool)) #pred model - input is context + mask embeddings, output is predictions
         pred_var = torch.var(x.detach(), dim=0).mean().cpu()
         xmask = attention_mask == 2 # mask token embeddings for output of pred_model
         ymask = batch['target_mask'] # target mask tokens for the true values
-        
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
             y_var = torch.var(y, dim=0).mean().cpu()
@@ -183,6 +185,8 @@ for epoch in range(config.start_epoch,config.epochs):
                 x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
                 x = torch.cat([x, tokens],dim=1)
                 attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
+                #print(attention_mask.shape)
+                #attention_mask[:, xbatch['attention_mask'].shape[1]] = 1 #Fix the tranform token to not be a mask token
                 x = pred_model(x, attention_mask.to(torch.bool))
                 xmask = attention_mask == 2
                 ymask = batch['target_mask']

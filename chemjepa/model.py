@@ -221,9 +221,9 @@ class PredictorTokenTransform(nn.Module):
         :param positional_encoder: generally from encoder.embeddings.position_embeddings
         """
         super().__init__()
-        self.transform_mlp = MLP(768, 1, 768*2, 2, dropout=0.0) #MLP(768, 1, 768, 1)
+        self.transform_mlp = MLP(768, 1, 768, 1, dropout=0.0) #MLP(768, 1, 768, 1)
         self.positional_encoder = positional_encoder #Function to get positional encoding
-        self.mask_token = nn.Parameter(torch.randn(768, 1))
+        self.mask_token = nn.Parameter(torch.randn(768))
         self.padding_token = padding_token
 
     def encoder(self,
@@ -236,10 +236,10 @@ class PredictorTokenTransform(nn.Module):
         """
         mask = batch['input_ids'].ne(self.padding_token).int() #Input ids that aren't the padding token are encoded...
         incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask #Create the number of the indices
-        encs = incremental_indices.long() + padding_idx #Some number for the position embedding - which is +1 b/c that's how BERTa does it
-        encs = self.position_embeddings(encs) #Position embeddings
+        encs = incremental_indices.long() + self.padding_token #Some number for the position embedding - which is +1 b/c that's how BERTa does it
+        encs = self.positional_encoder(encs) #Position embeddings
         tres = batch['transform'].unsqueeze(1).float() #This must be the transform token or signal
-        trns = self.transform_mlp(tres, dtype=torch.float).unsqueeze(1).repeat(1, 512, 1)
+        trns = self.transform_mlp(tres).unsqueeze(1).repeat(1, 512, 1)
         return trns + encs #Add the transform signal and the positional embedding...
 
     def forward(self, xbatch, batch):
@@ -266,7 +266,7 @@ class PredictorTokenTransform(nn.Module):
         #Now we append them to the batch and return (tokens for predictor, mask for predictor, target tokens mask)
         return torch.cat([xbatch['input_ids'], ptokens], dim=1), \
                torch.cat([xbatch['attention_mask'], pattention_mask], dim=1), \
-               torch.cat([xbatch['attention_mask'] * 0, pattention_mask], dim=1)
+               torch.cat([xbatch['attention_mask'] * 0, pattention_mask], dim=1).to(torch.bool)
 
 
 class CJPredictor(nn.Module):
@@ -293,7 +293,7 @@ class CJPredictor(nn.Module):
             padding,
     ):
         for idx, layer in enumerate(self.layers):
-            tokens = layer(tokens, padding_mask=padding)
+            tokens = layer(tokens, padding_mask=padding.to(torch.bool))
         return tokens
 
 

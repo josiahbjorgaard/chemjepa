@@ -175,26 +175,6 @@ class CJEncoder(nn.Module):
         return tokens
 
 
-def make_predictor_tokens(encoder, transform, target_mask):
-    """
-
-    :param encoder: function which encodes input_ids (These are the transform)
-    :param transform:  the transform tokens
-    :param target_mask: the attention mask that corresponds to the masked tokens (for PE)
-    :return: tokens, attention mask such that tokens[attention_mask] are the embedded masked tokens for prediction
-    """
-    target_token_batch = {'input_ids': transform.unsqueeze(1).repeat(1, target_mask.shape[1]),
-                          'attention_mask': target_mask}
-    ptokens, pattention_mask = encoder(target_token_batch)
-    # Now we need to select just the tokens for prediction and append them
-    ptokens = [t[a] for t, a in zip(ptokens, pattention_mask)] #Should check that these are being selected correctly...
-    max_len = max([t.shape[0] for t in ptokens])
-    ptokens = [F.pad(t, [0, 0, 0, max_len - t.shape[0]], value=float('nan')) for t in ptokens]
-    ptokens = torch.stack(ptokens)
-    pattention_mask = (~ptokens[:, :, 0].isnan()).to(torch.long)
-    ptokens = torch.nan_to_num(ptokens, 0.0)
-    return ptokens, pattention_mask
-
 class HFEncoder(nn.Module):
     def __init__(
             self,
@@ -225,45 +205,68 @@ class HFEncoder(nn.Module):
                 for param in module.parameters():
                     param.requires_grad = False
         print(self.model)
-        self.transform_mlp =  MLP(768,1,768*2,2, dropout=0.0) #MLP(768, 1, 768, 1)
-        #self.transform_encoder = nn.Embedding(2,768)
+
+    def forward(
+            self,
+            batch,
+    ):
+        tokens = self.model(input_ids = batch['input_ids'], attention_mask = batch['attention_mask']).last_hidden_state
+        return tokens
+
+
+class PredictorTokenTransform(nn.Module):
+    def __init__(self, positional_encoder, padding_token=1):
+        """
+
+        :param positional_encoder: generally from encoder.embeddings.position_embeddings
+        """
+        super().__init__()
+        self.transform_mlp = MLP(768, 1, 768*2, 2, dropout=0.0) #MLP(768, 1, 768, 1)
+        self.positional_encoder = positional_encoder #Function to get positional encoding
+        self.mask_token = nn.Parameter(torch.randn(768, 1))
+        self.padding_token = padding_token
 
     def encoder(self,
-            x):
+            batch, #Generally 1 for e.g. ChemBERTa
+            ):
         """
         Take input_ids/attention mask for mask tokens (where input_ids are mask tokens and attention mask is the location of mask tokens)
         :param x:
         :return: Encoding of the mask tokens with the same attention mask
         """
-        padding_idx = 1
-        x['input_ids'][:, 0] = 1 #For some reason, make the 0eth token 1?
-        x['input_ids'][:, -1] = 1 #For some reason make the last token 1?
-        mask = x['input_ids'].ne(padding_idx).int() #Input ids that aren't the padding token are good...
+        mask = batch['input_ids'].ne(self.padding_token).int() #Input ids that aren't the padding token are encoded...
         incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask #Create the number of the indices
         encs = incremental_indices.long() + padding_idx #Some number for the position embedding - which is +1 b/c that's how BERTa does it
-        encs = self.model.embeddings.position_embeddings(encs) #Position embeddings
-        tres = x['input_ids'][:, 1]#.unsqueeze(1).float() #This must be the transform token or signal, which is repeated in all but first and last token...
-        #trns = self.transform_encoder(tres)#.unsqueeze(1).repeat(1, 512, 1) #This encodes the transform and repeats it for all tokens...
-        trns2 = self.transform_mlp(torch.zeros_like(tres.unsqueeze(1), dtype=torch.float)).unsqueeze(1).repeat(1,512,1)
-        #encs[:, 0, :] = trns
-        #x['attention_mask'][:, 0] = 1
-        return trns2 + encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
-        #return encs, x['attention_mask'] #Add the ttransform signal and the positional embedding...
-    
-    def forward(
-            self,
-            batch,
-            pbatch=None,
-            #mask = None
-    ):
-        tokens = self.model(input_ids = batch['input_ids'], attention_mask = batch['attention_mask']).last_hidden_state
-        if pbatch:
-            pout = make_predictor_tokens(self.encoder,
-                                            transform=pbatch['transform'],
-                                            target_mask=pbatch['target_mask'])
-            return tokens, pout
-        else:
-            return tokens
+        encs = self.position_embeddings(encs) #Position embeddings
+        tres = batch['transform'].unsqueeze(1).float() #This must be the transform token or signal
+        trns = self.transform_mlp(tres, dtype=torch.float).unsqueeze(1).repeat(1, 512, 1)
+        return trns + encs #Add the transform signal and the positional embedding...
+
+    def forward(self, xbatch, batch):
+        """
+        :param x: Context encodings
+        :param batch: Unmasked target batch which includes the target_mask and transform values
+        :return: batch for predictor which includes the context encodings and the target masked token encodings
+        """
+        # Encode positions and transform
+        ptokens = self.encoder(batch)
+
+        # Now we need to select just the tokens for prediction
+        ptokens = [t[a] for t, a in zip(ptokens, batch['target_mask'])]
+        max_len = max([t.shape[0] for t in ptokens])
+        ptokens = [F.pad(t, [0, 0, 0, max_len - t.shape[0]], value=float('nan')) for t in ptokens]
+        ptokens = torch.stack(ptokens) #Reduced size to just the prediction tokens
+        pattention_mask = (~ptokens[:, :, 0].isnan()).to(torch.long) #NaN values are to be attention masked
+        ptokens = torch.nan_to_num(ptokens, self.padding_token) #Set them to the padding token
+
+        # Add the base token
+        ptokens = ptokens + self.mask_token.repeat(ptokens.shape[0], ptokens.shape[1], 1)
+
+
+        #Now we append them to the batch and return (tokens for predictor, mask for predictor, target tokens mask)
+        return torch.cat([xbatch['input_ids'], ptokens], dim=1), \
+               torch.cat([xbatch['attention_mask'], pattention_mask], dim=1), \
+               torch.cat([xbatch['attention_mask'] * 0, pattention_mask], dim=1)
 
 
 class CJPredictor(nn.Module):
@@ -274,7 +277,6 @@ class CJPredictor(nn.Module):
             dim_head=64,
             heads=8,
             ff_mult=4,
-            transform=False,
             **kwargs
     ):
         super().__init__()
@@ -285,30 +287,11 @@ class CJPredictor(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(layers):
             self.layers.append(TransformerLayer(hidden_size, dim_head, heads, ff_mult))
-        self.transform_mix = MLP(hidden_size, hidden_size+1, hidden_size, 1) if transform == "mix" else None
     def forward(
             self,
             tokens,
             padding,
-            mask=None,
-            transform=None,
     ):
-        """
-        mask is 2d (batch, token inde)
-        padding is 2d (batch, token index)
-        transform is 1d (batch)
-        tokens is 3d (batch, token, embedding)
-        """
-
-        #Doing below with torch scatter would probably be faster
-        if mask is not None and transform is not None and self.transform_mix is not None:
-            mask_tokens = torch.stack([torch.cat([tokens[idx[0],idx[1],:].squeeze(),
-                                                  transform[idx[0]].unsqueeze(0)])
-                                       for idx in mask.nonzero()])
-            transformed_tokens = self.transform_mix(mask_tokens)
-            for i, idx in enumerate(mask.nonzero()):
-                tokens[idx[0], idx[1], :] = transformed_tokens[i, :]
-
         for idx, layer in enumerate(self.layers):
             tokens = layer(tokens, padding_mask=padding)
         return tokens

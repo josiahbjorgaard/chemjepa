@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model import CJEncoder, HFEncoder, CJPredictor, make_predictor_tokens
+from model import CJEncoder, HFEncoder, CJPredictor, PredictorTokenTransform
 from utils.encoders import CJPreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
@@ -17,7 +17,7 @@ from utils.dataset import setup_data
 from accelerate import Accelerator
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 torch.autograd.set_detect_anomaly(True)
-from accelerate import DistributedDataParallelKwargs
+#from accelerate import DistributedDataParallelKwargs
 from safetensors.torch import load_model
 torch.autograd.set_detect_anomaly(True)
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -49,6 +49,7 @@ decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 #yenc_model = xenc_model
 pred_model = CJPredictor(**model_config['predictor'])
+ptform = PredictorTokenTransform(xenc_model.embeddings.position_embeddings)
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
 
@@ -69,10 +70,10 @@ preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
         encoder = config.encoder.type)
 
 # Creating a DataLoader object for iterating over it during the training epochs
-train_dl = DataLoader( datasets["train"], batch_size=config.batch_size,
+train_dl = DataLoader(datasets["train"], batch_size=config.batch_size,
                        shuffle=True, num_workers=8, prefetch_factor=4,
                        collate_fn = preprocessing_collator)
-eval_dl = DataLoader( datasets["test"], batch_size=config.batch_size,
+eval_dl = DataLoader(datasets["test"], batch_size=config.batch_size,
                       collate_fn = preprocessing_collator, num_workers=8, prefetch_factor=4)
 
 accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
@@ -104,45 +105,44 @@ if config.restart:
     load_model(xenc_model, os.path.join(config.restart,'model.safetensors'))
     load_model(yenc_model, os.path.join(config.restart,'model_1.safetensors'))
     load_model(pred_model, os.path.join(config.restart, 'model_2.safetensors'))
+    load_model(ptform, os.path.join(config.restart, 'model_3.safetensor'))
     #load_model(optimizer, os.path.join(config.restart, 'model_3.safetensors'))
     #accelerator.load_state(config.restart)
     if config.reset_lr:
         for param_group in optimizer.param_groups:
             param_group['lr'] = config.reset_lr
 
-xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
-     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
+xenc_model, yenc_model, pred_model, ptform, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
+     xenc_model, yenc_model, pred_model, ptform, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
      )
 
 #yenc_model.to(accelerator.device)
 
 # Start model training and defining the training loop
 
-xenc_model.train()
-pred_model.train()
-yenc_model.eval()
 
 world_size = torch.cuda.device_count()
-for epoch in range(config.start_epoch,config.epochs):
+for epoch in range(config.start_epoch, config.epochs):
+    xenc_model.train()
+    pred_model.train()
+    ptform.train()
+    yenc_model.eval()
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
         batch, xbatch, xmask, _ = batch #batch - all data the targets, xbatch - context data only (transformed potentially), xmask - tokens to predict (not in xbatch)
         batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
+
         # Training
-        print(f"Before: {batch['input_ids'][:,0]}")
-        x, (tokens, attention_mask) = xenc_model(xbatch, batch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
-        print(f"After: {batch['input_ids'][:,0]}")
-        enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-        x = torch.cat([x, tokens], dim=1)
-        attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1) # attention mask == 2 now is for the tokens to predict
-        #attention_mask[:, xbatch['attention_mask'].shape[1]] = 1 #Fix the tranform token to not be a mask token
-        x = pred_model(x, attention_mask.to(torch.bool)) #pred model - input is context + mask embeddings, output is predictions
-        pred_var = torch.var(x.detach(), dim=0).mean().cpu()
-        xmask = attention_mask == 2 # mask token embeddings for output of pred_model
-        ymask = batch['target_mask'] # target mask tokens for the true values
+        x = xenc_model(xbatch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
         with torch.no_grad():
             y = yenc_model(batch) #Target Encoder gets all context and all tokens
-            y_var = torch.var(y, dim=0).mean().cpu()
+        enc_var = torch.var(x.detach(), dim=0).mean().cpu()
+        y_var = torch.var(y.detach(), dim=0).mean().cpu()
+        x, pattention_mask, xmask = ptform({'input_ids': x,
+                         'attention_mask': xbatch['attention_mask']}, batch)
+        x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
+        pred_var = torch.var(x.detach(), dim=0).mean().cpu()
+        ymask = batch['target_mask'] # target mask tokens for the true values
         loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)
@@ -175,24 +175,25 @@ for epoch in range(config.start_epoch,config.epochs):
     if config.run_eval_loop:
         xenc_model.eval()
         pred_model.eval()
+        ptform.eval()
         with torch.no_grad():
             epoch_loss = 0.0
             for i, batch in enumerate(tqdm(eval_dl)):
-                       # Mutation and masking function here
+                # Mutation and masking function here
                 batch, xbatch, xmask, _ = batch
                 batch, xbatch, xmask = move_to(batch, device), move_to(xbatch, device), move_to(xmask, device)
                 # Training
-                x, (tokens, attention_mask) = xenc_model(xbatch, batch) #, xmask)
-                x = torch.cat([x, tokens],dim=1)
-                attention_mask = torch.cat([xbatch['attention_mask'], attention_mask * 2], dim=1)
-                #print(attention_mask.shape)
-                #attention_mask[:, xbatch['attention_mask'].shape[1]] = 1 #Fix the tranform token to not be a mask token
-                x = pred_model(x, attention_mask.to(torch.bool))
-                xmask = attention_mask == 2
-                ymask = batch['target_mask']
-                y = yenc_model(batch) #Target Encoder gets all context and all tokens
-                loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
-
+                x = xenc_model(xbatch)  # x in the context tokens, (tokens, attention_mask) are the prediction tokens
+                y = yenc_model(batch)  # Target Encoder gets all context and all tokens
+                enc_var = torch.var(x.detach(), dim=0).mean().cpu()
+                y_var = torch.var(y.detach(), dim=0).mean().cpu()
+                x, pattention_mask, xmask = ptform({'input_ids': x,
+                                                    'attention_mask': xbatch['attention_mask']}, batch)
+                x = pred_model(x,
+                               pattention_mask)  # pred model - input is context + mask embeddings, output is predictions
+                pred_var = torch.var(x.detach(), dim=0).mean().cpu()
+                ymask = batch['target_mask']  # target mask tokens for the true values
+                loss = loss_function(x[xmask], y[ymask])
                 #Step Log
                 accelerator.log({"val_step_loss":loss.to("cpu")})
                 epoch_loss += loss.to("cpu")

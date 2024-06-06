@@ -106,6 +106,8 @@ class SmilesEnumerator(object):
             return one_hot
 
 
+#Write some tests for this
+
 class SmilesTransformations(nn.Module):
     def __init__(self,
                  mask_size=4,

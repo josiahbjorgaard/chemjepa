@@ -212,11 +212,11 @@ class CJPreprocessCollator:
             batch = self.tokenize(smiles)
             batch['transform'] = None
             xbatch=batch
-        if self.mask:
-            xbatch['input_ids'][xmask] = self.mask_token
-            xbatch['attention_mask'][xmask] = 0
-        else:
-            return dict(batch)
+        #if self.mask:
+        #    xbatch['input_ids'][xmask] = self.mask_token
+        #    xbatch['attention_mask'][xmask] = 0
+        #else:
+        #    return dict(batch)
         return dict(batch), dict(xbatch), xmask, metadata
 
 
@@ -255,11 +255,10 @@ class CJSimplePreprocessCollator:
         smiles = [x[self.smiles_col] for x in batch]
         metadata = {k:[x[k] for x in batch] for k in batch[0].keys()}
         if self.transform:
-            batch = self.tokenize(smiles) #For context encoder
-            xbatch = batch
+            batch = self.tokenize(smiles) #For True values
+            xbatch = self.tokenize(smiles) #For Context Encoder
             for idx, row in enumerate(xbatch['attention_mask']):
                 max_len = row.sum()
-                print(max_len)
                 seed = random.randint(1, max_len-self.mask_size-1)
                 xbatch['input_ids'][idx,seed:seed+self.mask_size] = 4
             if self.rotate == 'flip': #Hack to flip in order to test
@@ -271,7 +270,7 @@ class CJSimplePreprocessCollator:
                         t,a = xbatch['input_ids'][idx],xbatch['attention_mask'][idx]
                         toks = t #torch.flip(t, dims=[0])
                         xbatch['input_ids'][idx] = toks
-            pxmask = mbatch['input_ids'] == 4 #Get mask tokens for ChemBERTa only here
+            pxmask = xbatch['input_ids'] == 4 #Get mask tokens for ChemBERTa only here
             xmask = xbatch['input_ids'] == 4
             batch['transform'] = torch.zeros(batch['input_ids'].shape[0])
             #For new mask encodings, we need to set up the target mask positional
@@ -282,9 +281,4 @@ class CJSimplePreprocessCollator:
             batch = self.tokenize(smiles)
             batch['transform'] = None
             xbatch=batch
-        if self.mask:
-            xbatch['input_ids'][xmask] = self.mask_token
-            xbatch['attention_mask'][xmask] = 0
-        else:
-            return dict(batch)
         return dict(batch), dict(xbatch), xmask, metadata

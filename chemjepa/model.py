@@ -395,16 +395,19 @@ class PretrainedCJEncoder(nn.Module):
             self.encoder = CJEncoder(**encoder_config, embedding_config=embedding_config)
         self.dim = encoder_config['hidden_size']
         if 'weights' in encoder_config:
+            #self.encoder = nn.DataParallel(self.encoder)
             load_model(self.encoder, encoder_config['weights'])
+            #self.encoder = self.encoder.module
         self.predictor = CJPredictor(**predictor_config)
         if 'weights' in predictor_config:
+            #self.predictor = nn.DataParallel(self.predictor)
             load_model(self.predictor, predictor_config['weights'])
-
+            #self.predictor = self.predictor.module
         if encoder_config['freeze_layers'] > 0:
             print(f"Freezing {encoder_config['freeze_layers']} encoder layers")
             if encoder_config['type'] == 'chemberta':
                 modules_to_freeze = [self.encoder.model.embeddings,
-                                     self.encoder.transform_encoder,
+                                     #self.encoder.transform_encoder,
                                      self.encoder.model.encoder.layer[:predictor_config['freeze_layers']]]
             else:
                 modules_to_freeze = [self.encoder.encoder,
@@ -435,15 +438,16 @@ class PretrainedCJEncoder(nn.Module):
         else:  # self.pooling_type == "augmented":
             target_mask = batch['attention_mask']
 
-        output, (x, a) = self.encoder(batch, {'transform': transform,
-                                            'target_mask': target_mask})
+        output = self.encoder(batch)#, {'transform': transform,
+                                             #'target_mask': target_mask})
         if self.run_predictor:
             if self.class_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
                 #assert self.pooling_type == 'first'
                 #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
                 n_init = batch['input_ids'].shape[1]
-                output = torch.cat([x, output], dim=1)
-                batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
+                #output = torch.cat([x, output], dim=1)
+                #batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
+                raise Exception("Needs implementation with pttransform function")
             output = self.predictor(output,
                                     batch['attention_mask'].to(torch.bool)
                                     )

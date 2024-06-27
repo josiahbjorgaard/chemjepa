@@ -212,6 +212,7 @@ class CJPreprocessCollator:
             batch = self.tokenize(smiles)
             batch['transform'] = None
             xbatch=batch
+            xmask=None
         #if self.mask:
         #    xbatch['input_ids'][xmask] = self.mask_token
         #    xbatch['attention_mask'][xmask] = 0

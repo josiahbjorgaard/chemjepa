@@ -384,11 +384,11 @@ class PretrainedCJEncoder(nn.Module):
                  encoder_config,
                  predictor_config,
                  pooling_type="first",
-                 class_token_predictor = False,
+                 mask_token_predictor = True,
                  **kwargs):
         super().__init__()
         self.run_predictor = run_predictor
-        self.class_token_predictor = class_token_predictor
+        self.mask_token_predictor = mask_token_predictor
         if encoder_config['type'] == 'chemberta':
             self.encoder = HFEncoder(**encoder_config, embedding_config=embedding_config)
         else:
@@ -421,7 +421,10 @@ class PretrainedCJEncoder(nn.Module):
             for module in modules_to_freeze:
                 for param in module.parameters():
                     param.requires_grad = False
-
+        if self.mask_token_predictor:
+            self.ptform = PredictorTokenTransform(self.encoder.model.embeddings.position_embeddings)
+        else:
+            self.ptform = None
         self.pooling_type = pooling_type
     def unfreeze_layers(self, layers):
         raise NotImplementedError
@@ -441,17 +444,16 @@ class PretrainedCJEncoder(nn.Module):
         output = self.encoder(batch)#, {'transform': transform,
                                              #'target_mask': target_mask})
         if self.run_predictor:
-            if self.class_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
-                #assert self.pooling_type == 'first'
-                #assert 'transform' in batch.keys() and 'target_mask' in batch.keys()
-                n_init = batch['input_ids'].shape[1]
-                #output = torch.cat([x, output], dim=1)
-                #batch['attention_mask'] = torch.cat([a, batch['attention_mask']], dim=1)
-                raise Exception("Needs implementation with pttransform function")
+            attention_mask = batch['attention_mask']
+            if self.mask_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
+                n_init = output.shape[1]
+                batch['target_mask'] = batch['attention_mask']
+                output, attention_mask, _ = self.ptform({'input_ids': output,
+                                                    'attention_mask': attention_mask}, batch)
             output = self.predictor(output,
-                                    batch['attention_mask'].to(torch.bool)
+                                    attention_mask.to(torch.bool)
                                     )
-            if self.class_token_predictor: #Trim to mask tokens for fine tuning
+            if self.mask_token_predictor: #Trim to mask tokens for fine tuning
                 output = output[:, n_init:, :]
                 batch['attention_mask'] = batch['attention_mask'][:, n_init:]
 

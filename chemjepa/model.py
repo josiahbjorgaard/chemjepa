@@ -423,6 +423,11 @@ class PretrainedCJEncoder(nn.Module):
                     param.requires_grad = False
         if self.mask_token_predictor:
             self.ptform = PredictorTokenTransform(self.encoder.model.embeddings.position_embeddings)
+            load_model(self.ptform, predictor_config['mask_weights'])
+            module_to_freeze = [self.ptform.transform_mlp,self.ptform.positional_encoder,self.ptform.mask_token]
+            for module in modules_to_freeze:
+                for param in module.parameters():
+                    param.requires_grad = False
         else:
             self.ptform = None
         self.pooling_type = pooling_type
@@ -447,6 +452,7 @@ class PretrainedCJEncoder(nn.Module):
             attention_mask = batch['attention_mask']
             if self.mask_token_predictor: #Misnomer - this means to augmented predictor with mask tokens
                 n_init = output.shape[1]
+                batch['transform'] = torch.zeros(output.shape[0], device=output.device)
                 batch['target_mask'] = batch['attention_mask']
                 output, attention_mask, _ = self.ptform({'input_ids': output,
                                                     'attention_mask': attention_mask}, batch)
@@ -455,8 +461,8 @@ class PretrainedCJEncoder(nn.Module):
                                     )
             if self.mask_token_predictor: #Trim to mask tokens for fine tuning
                 output = output[:, n_init:, :]
-                batch['attention_mask'] = batch['attention_mask'][:, n_init:]
-
+                batch['attention_mask'] = attention_mask[:, n_init:]
+                
         if self.pooling_type == "mean":
             embeddings = output
             padding_mask = batch['attention_mask']
@@ -482,7 +488,7 @@ class FineTuneModel(nn.Module):
                                             encoder_config,
                                             predictor_config,
                                             pooling_type=decoder_config.pooling_type,
-                                            class_token_predictor = predictor_config['fine_tune_with_class_token']
+                                            mask_token_predictor = predictor_config['fine_tune_with_mask_tokens']
                                             )
 
         if decoder_config.type == "MLP":

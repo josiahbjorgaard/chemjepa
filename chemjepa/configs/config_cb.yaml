@@ -1,0 +1,42 @@
+#label_col: "Labels"
+#restart: "test2_new5e4/2"
+#wandb_restart: "vnjuxtc2"
+epochs: 100
+#start_epoch: 1
+batch_size: 48
+num_warmup_steps: 1000
+lr_scheduler_type: "cosine"
+lr: 1e-4
+weight_decay: 0.1
+#lr_scheduler_type: "constant"
+#lr: 1e-5
+#reset_lr: True
+output_dir: "test_m2_2e4_base" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
+dataset: "/shared/encoded_pubchem10M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
+split: 0.1
+ds_frac: 1.0
+ds_seed: 42
+seed: 42
+dropout: 0.2
+clip: 2.0
+n_step_checkpoint: 1000
+#run_eval_loop: True
+#embedding: CN(new_allowed=True)  # None #{}
+num_mask: 2 #4
+transform: "flip" #"flip" #False, "mix", or  "embedding"
+rotate: "none" #"none", "all", "init", "flip"
+embedding:
+  pad_len: 128
+  embedding_dim: 384
+  num_embeddings: 1
+encoder:
+  ema_decay: 0.990
+  type: 'chemberta'
+  freeze_layers: 100
+predictor:
+  transform: False
+  hidden_size: 768  # hidden size
+  layers: 10  # layers
+  heads: 8  # num heads
+  dim_head: 96  # heads * dim_head: intermediate size
+  ff_mult: 4  # Feed forward multiplier

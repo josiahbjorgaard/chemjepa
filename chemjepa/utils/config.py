@@ -60,7 +60,7 @@ def get_cfg_defaults_train():
     config.predictor.heads = 4  # num heads
     config.predictor.dim_head = 96  # heads * dim_head = intermediate size
     config.predictor.ff_mult = 4  # Feed forward multiplier
-    config.predictor.fine_tune_with_class_token = False
+    config.predictor.fine_tune_with_mask_tokens = False
     config.predictor.freeze_layers = 0
     config.decoder = CN(new_allowed=True)
     return config.clone()

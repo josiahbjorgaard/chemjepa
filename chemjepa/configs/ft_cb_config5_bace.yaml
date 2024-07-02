@@ -1,0 +1,65 @@
+#label_col: "Labels"
+#restart: "test2_new5e4/2"
+#wandb_restart: "vnjuxtc2"
+epochs: 1000
+#start_epoch: 0
+batch_size: 256 #384
+num_warmup_steps: 300
+#lr_scheduler_type: "cosine"
+lr: 1e-5
+#output_dir: "" #datetime.now().strftime('training_output_%H_%M_%d_%m_%Y')
+#dataset: "/shared/encoded_pubchem10M" #"/shared/fcaa53cd-ba57-4bfe-af9c-eaa958f95c1a_combined_all"
+#dataset: '/shared/tox21_hepg2_combined_split'
+dataset: '/shared/BACE_dataset'
+#dataset: '/shared/toxicity_split_cleaned'
+smiles_col: "canonical_smiles"
+split: 0.1
+ds_frac: 1.0
+ds_seed: 42
+seed: 42
+dropout: 0.2
+clip: 2.0
+n_step_checkpoint: 1000
+#run_eval_loop: True
+#embedding: CN(new_allowed=True)  # None #{}
+num_mask: 0 #4
+transform: "None" #"old"
+mask: False
+project_name: ChemJEPAFT
+rotate: ""
+run_predictor: True #False
+decoder:
+        #type: Attentive #MLP
+  type: MLP
+  nlayers: 3
+  dropout: 0.2
+  nhid: 256 #384 #256 #512
+  ninp: 768
+  ntoken: 1 #2
+  #pooling_type: None #'mean'
+  pooling_type: 'mean'
+embedding:
+  pad_len: 128
+  embedding_dim: 384
+  num_embeddings: 1
+encoder:
+  ema_decay: 0.990
+  type: 'chemberta'
+  freeze_layers: 100
+  weights: "test_m2_2e4_base/5/model.safetensors"
+predictor:
+  transform: False
+  hidden_size: 768  # hidden size
+  layers: 10  # layers
+  heads: 8  # num heads
+  dim_head: 96  # heads * dim_head: intermediate size
+  ff_mult: 4  # Feed forward multiplier
+  weights: "test_m2_2e4_base/5/model_2.safetensors"
+  #dataset: '/shared/auc_a549_class_split'
+  fine_tune_with_class_token: False #True
+  freeze_layers: 10
+label_col: 'targets' #'value' #'mean' #'LogFC_CDH3'
+#var_col: 'LogFCVar_CDH3'
+loss_config:
+  type: "bce"
+  class_index: 0

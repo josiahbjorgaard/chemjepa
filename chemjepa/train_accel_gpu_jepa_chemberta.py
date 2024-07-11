@@ -5,10 +5,12 @@ from time import gmtime, strftime
 from tqdm.auto import tqdm
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import get_scheduler
-from model_torchmd import TensorNet
+from model import CJEncoder, HFEncoder, CJPredictor, PredictorTokenTransform
+from utils.encoders import CJPreprocessCollator, CJSimplePreprocessCollator
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
 from utils.dataset import setup_data
@@ -39,13 +41,18 @@ model_config = get_model_config(config)
 device = accelerator.device
 
 # Model
-xenc_model = TensorNet(**model_config['tensornet'])
+if model_config['encoder']['type']=='chemberta':
+    xenc_model = HFEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
+else:
+    xenc_model = CJEncoder(**model_config['encoder'], embedding_config=model_config['embedding'])
 decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 #yenc_model = xenc_model
-pred_model = TensorNet(**model_config['tensornet'])
+pred_model = CJPredictor(**model_config['predictor'])
+ptform = PredictorTokenTransform(xenc_model.model.embeddings.position_embeddings)
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
+config.ptform_n_params_emb, config.ptform_n_params_nonemb = count_parameters(ptform, print_summary=False)
 
 # Initialise your wandb run, passing wandb parameters and any config information
 init_kwargs={"wandb": {"entity": "josiahbjorgaard"}}
@@ -58,7 +65,11 @@ accelerator.init_trackers(
     init_kwargs=init_kwargs
     )
 
-# Dataset from TensorNet
+preprocessing_collator = CJPreprocessCollator(num_mask = config.num_mask,
+        mask_token = 4,
+        transform = config.transform,
+        rotate = config.rotate,
+        encoder = config.encoder.type)
 
 # Creating a DataLoader object for iterating over it during the training epochs
 train_dl = DataLoader(datasets["train"], batch_size=config.batch_size,
@@ -97,14 +108,15 @@ if config.restart:
     load_model(xenc_model, os.path.join(config.restart,'model.safetensors'))
     load_model(yenc_model, os.path.join(config.restart,'model_1.safetensors'))
     load_model(pred_model, os.path.join(config.restart, 'model_2.safetensors'))
+    load_model(ptform, os.path.join(config.restart, 'model_3.safetensor'))
     #load_model(optimizer, os.path.join(config.restart, 'model_3.safetensors'))
     #accelerator.load_state(config.restart)
     if config.reset_lr:
         for param_group in optimizer.param_groups:
             param_group['lr'] = config.reset_lr
 
-xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
-     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
+xenc_model, yenc_model, pred_model, ptform, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
+     xenc_model, yenc_model, pred_model, ptform, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
      )
 
 #yenc_model.to(accelerator.device)
@@ -116,6 +128,7 @@ world_size = torch.cuda.device_count()
 for epoch in range(config.start_epoch, config.epochs):
     xenc_model.train()
     pred_model.train()
+    ptform.train()
     yenc_model.eval()
     for idb, batch in tqdm(enumerate(train_dl)):
         # Mutation and masking function here
@@ -132,6 +145,8 @@ for epoch in range(config.start_epoch, config.epochs):
         enc_mean = x.detach().mean().cpu()
         y_var = torch.var(y.detach(), dim=0).mean().cpu()
         y_mean = y.detach().mean().cpu()
+        x, pattention_mask, xmask = ptform({'input_ids': x,
+                         'attention_mask': xbatch['attention_mask']}, batch)
         x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
         pred_var = torch.var(x.detach(), dim=0).mean().cpu()
         pred_mean = x.detach().mean().cpu()
@@ -171,6 +186,7 @@ for epoch in range(config.start_epoch, config.epochs):
     if True: #config.run_eval_loop:
         xenc_model.eval()
         pred_model.eval()
+        ptform.eval()
         with torch.no_grad():
             epoch_loss = 0.0
             for i, batch in enumerate(tqdm(eval_dl)):
@@ -188,6 +204,8 @@ for epoch in range(config.start_epoch, config.epochs):
                 enc_mean = x.detach().mean().cpu()
                 y_var = torch.var(y.detach(), dim=0).mean().cpu()
                 y_mean = y.detach().mean().cpu()
+                x, pattention_mask, xmask = ptform({'input_ids': x,
+                                 'attention_mask': xbatch['attention_mask']}, batch)
                 x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
                 pred_var = torch.var(x.detach(), dim=0).mean().cpu()
                 pred_mean = x.detach().mean().cpu()

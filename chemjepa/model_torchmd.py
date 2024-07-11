@@ -1,5 +1,6 @@
 import torch
-from torch import nn
+from typing import Optional, Tuple
+from torch import Tensor, nn
 from torchmdnet.models.utils import (
     CosineCutoff,
     OptimizedDistance,
@@ -165,15 +166,15 @@ class TensorNet(nn.Module):
         self.linear.reset_parameters()
         self.out_norm.reset_parameters()
 
-    def forward(
+    def pre_forward(
         self,
         z: Tensor,
         pos: Tensor,
         batch: Tensor,
         box: Optional[Tensor] = None,
         q: Optional[Tensor] = None,
-        s: Optional[Tensor] = None,
-    ) -> Tuple[Tensor, Optional[Tensor], Tensor, Tensor, Tensor]:
+        s: Optional[Tensor] = None, #Not used...
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         # Obtain graph, with distances and relative position vectors
         edge_index, edge_weight, edge_vec = self.distance(pos, batch, box)
         # This assert convinces TorchScript that edge_vec is a Tensor and not an Optional[Tensor]
@@ -204,8 +205,25 @@ class TensorNet(nn.Module):
         # I avoid dividing by zero by setting the weight of self edges and self loops to 1
         edge_vec = edge_vec / edge_weight.masked_fill(mask, 1).unsqueeze(1)
         X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr)
+        return X, edge_index, edge_weight, edge_attr, q
+
+
+    def forward(
+            self,
+            X,
+            edge_index,
+            edge_weight,
+            edge_attr,
+            q,
+    ) -> Tensor:
         for layer in self.layers:
             X = layer(X, edge_index, edge_weight, edge_attr, q)
+        return X
+
+    def post_forward(
+            self,
+            X
+            ):
         I, A, S = decompose_tensor(X)
         x = torch.cat((tensor_norm(I), tensor_norm(A), tensor_norm(S)), dim=-1)
         x = self.out_norm(x)
@@ -213,4 +231,4 @@ class TensorNet(nn.Module):
         # # Remove the extra atom
         if self.static_shapes:
             x = x[:-1]
-        return x, None, z, pos, batch
+        return x

@@ -163,37 +163,6 @@ for epoch in range(config.start_epoch, config.epochs):
     #Epoch end log and checkpoint
     os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
     accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
-    #Eval looop
-    if False: #config.run_eval_loop:
-        xenc_model.eval()
-        pred_model.eval()
-        with torch.no_grad():
-            epoch_loss = 0.0
-            for i, batch in enumerate(tqdm(eval_dl)):
-                # Mutation and masking function here
-                batch, xbatch, _, _ = batch #batch - all data the targets, xbatch - context data only (transformed potentially), xmask - tokens to predict (not in xbatch)
-                batch, xbatch = move_to(batch, device), move_to(xbatch, device)
-                diffbatch = batch['input_ids'][(batch['input_ids'] != xbatch['input_ids']).to(torch.bool)].shape
-                diffmask = batch['attention_mask'][(batch['attention_mask'] != xbatch['attention_mask']).to(torch.bool)].shape
-                #print(batch['input_ids'][:,-10:])
-                # Training
-                x = xenc_model(xbatch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
-                with torch.no_grad():
-                    y = yenc_model(batch) #Target Encoder gets all context and all tokens
-                enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-                enc_mean = x.detach().mean().cpu()
-                y_var = torch.var(y.detach(), dim=0).mean().cpu()
-                y_mean = y.detach().mean().cpu()
-                x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
-                pred_var = torch.var(x.detach(), dim=0).mean().cpu()
-                pred_mean = x.detach().mean().cpu()
-                ymask = batch['target_mask'] # target mask tokens for the true values
-                loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
-                #Step Log
-                accelerator.log({"val_step_loss":loss.to("cpu")})
-                epoch_loss += loss.to("cpu")
-            #Epoch Log
-            accelerator.log({'val_epoch_loss': epoch_loss})
 
 logger.info("End training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 accelerator.save_model(xenc_model, config.output_dir + "xenc_model", safe_serialization=True)

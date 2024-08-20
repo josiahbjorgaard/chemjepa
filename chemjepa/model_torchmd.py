@@ -79,8 +79,9 @@ class TensorEmbedding(nn.Module):
         )[..., None, None]
         return Zij
 
-    def _get_atomic_label_message(self, label: Tensor, edge_index: Tensor) -> Tensor:
+    def _get_atomic_label_message(self, label: Tensor, label_mask: Tensor, edge_index: Tensor) -> Tensor:
         L = self.label_emb(label)
+        L[label_mask] = 0.0
         Lij = self.label_emb2(
             L.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2
@@ -115,11 +116,12 @@ class TensorEmbedding(nn.Module):
         edge_weight: Tensor,
         edge_vec_norm: Tensor,
         edge_attr: Tensor,
-        label: Optional(Tensor),
+        labels: Tensor,
+        labels_mask: Tensor,
     ) -> Tensor:
         Zij = self._get_atomic_number_message(z, edge_index)
 
-        Lij = self._get_atomic_label_message(label, edge_index)
+        Lij = self._get_atomic_label_message(labels, labels_mask, edge_index)
 
         Iij, Aij, Sij = self._get_tensor_messages(
             Zij + Lij, edge_weight, edge_vec_norm, edge_attr
@@ -311,6 +313,7 @@ class TensorNet(nn.Module):
         z: Tensor,
         pos: Tensor,
         batch: Tensor,
+        labels: Optional[Tensor] = None,
         box: Optional[Tensor] = None,
         q: Optional[Tensor] = None,
         s: Optional[Tensor] = None, #Not used...
@@ -344,7 +347,7 @@ class TensorNet(nn.Module):
         # Normalizing edge vectors by their length can result in NaNs, breaking Autograd.
         # I avoid dividing by zero by setting the weight of self edges and self loops to 1
         edge_vec = edge_vec / edge_weight.masked_fill(mask, 1).unsqueeze(1)
-        X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr)
+        X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr, labels)
         return X, edge_index, edge_weight, edge_attr, q
 
 

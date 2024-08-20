@@ -118,25 +118,21 @@ for epoch in range(config.start_epoch, config.epochs):
     pred_model.train()
     yenc_model.eval()
     for idb, batch in tqdm(enumerate(train_dl)):
-        # Mutation and masking function here
-        batch, xbatch, _, _ = batch #batch - all data the targets, xbatch - context data only (transformed potentially), xmask - tokens to predict (not in xbatch)
+        #TODO pairing and masking should be done previously
+        batch, xbatch = batch #batch - (z, pos, batch)
         batch, xbatch = move_to(batch, device), move_to(xbatch, device)
-        diffbatch = batch['input_ids'][(batch['input_ids'] != xbatch['input_ids']).to(torch.bool)].shape
-        diffmask = batch['attention_mask'][(batch['attention_mask'] != xbatch['attention_mask']).to(torch.bool)].shape
-        #print(batch['input_ids'][:,-10:])
-        # Training
-        x = xenc_model(xbatch) #x in the context tokens, (tokens, attention_mask) are the prediction tokens
+
+        xX, edge_index, edge_weight, edge_attr, q = xenc_model.pre_forward(**xbatch)
+        x = xenc_model(xX, edge_index, edge_weight, edge_attr, q) #x in the context
+
         with torch.no_grad():
-            y = yenc_model(batch) #Target Encoder gets all context and all tokens
-        enc_var = torch.var(x.detach(), dim=0).mean().cpu()
-        enc_mean = x.detach().mean().cpu()
-        y_var = torch.var(y.detach(), dim=0).mean().cpu()
-        y_mean = y.detach().mean().cpu()
-        x = pred_model(x, pattention_mask) #pred model - input is context + mask embeddings, output is predictions
-        pred_var = torch.var(x.detach(), dim=0).mean().cpu()
-        pred_mean = x.detach().mean().cpu()
-        ymask = batch['target_mask'] # target mask tokens for the true values
-        loss = loss_function(x[xmask], y[ymask]) #Loss is only for masked tokens
+            yX, edge_index, edge_weight, edge_attr, q = yenc_model.pre_forward(**batch)
+            y = yenc_model(yX, edge_index, edge_weight, edge_attr, q) #Target Encoder
+
+        x = pred_model(x, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
+
+        mask = xbatch['mask'] # atoms with masked forces in context encoder
+        loss = loss_function(x[mask], y[mask]) #Loss is only for masked tokens
         optimizer.zero_grad()
         accelerator.backward(loss)
         if config.clip:
@@ -153,12 +149,12 @@ for epoch in range(config.start_epoch, config.epochs):
             progress_bar.update(world_size)
 
         accelerator.log({"total_loss": loss.detach().to("cpu"),
-                         "xenc_var": enc_var,
-                         "pred_var": pred_var,
-                         "yenc_var": y_var,
-                         'xenc_mean': enc_mean,
-                         'pred_mean': pred_mean,
-                         'yenc_mean': y_mean,
+                         #"xenc_var": enc_var,
+                         #"pred_var": pred_var,
+                         #"yenc_var": y_var,
+                         #'xenc_mean': enc_mean,
+                         #'pred_mean': pred_mean,
+                         #'yenc_mean': y_mean,
                          "xenc_param_norm": get_param_norm(xenc_model).to("cpu"),
                          "xenc_grad_norm": get_grad_norm(xenc_model).to("cpu"),
                          "pred_param_norm": get_param_norm(pred_model).to("cpu"),
@@ -168,7 +164,7 @@ for epoch in range(config.start_epoch, config.epochs):
     os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
     accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
     #Eval looop
-    if True: #config.run_eval_loop:
+    if False: #config.run_eval_loop:
         xenc_model.eval()
         pred_model.eval()
         with torch.no_grad():

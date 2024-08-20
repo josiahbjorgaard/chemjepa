@@ -9,6 +9,146 @@ from torchmdnet.models.utils import (
 )
 from torchmdnet.models.tensornet import *
 
+# Code refactor from source to facilitate context/predictor modules
+# and add force/energy features
+
+class TensorEmbedding(nn.Module):
+    """Tensor embedding layer.
+
+    :meta private:
+    """
+
+    def __init__(
+        self,
+        hidden_channels,
+        num_rbf,
+        activation,
+        cutoff_lower,
+        cutoff_upper,
+        trainable_rbf=False,
+        max_z=128,
+        num_labels=1,
+        dtype=torch.float32,
+    ):
+        super(TensorEmbedding, self).__init__()
+
+        self.hidden_channels = hidden_channels
+        self.distance_proj1 = nn.Linear(num_rbf, hidden_channels, dtype=dtype)
+        self.distance_proj2 = nn.Linear(num_rbf, hidden_channels, dtype=dtype)
+        self.distance_proj3 = nn.Linear(num_rbf, hidden_channels, dtype=dtype)
+        self.cutoff = CosineCutoff(cutoff_lower, cutoff_upper)
+        self.max_z = max_z
+        self.emb = nn.Embedding(max_z, hidden_channels, dtype=dtype)
+        self.emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
+        self.label_emb = nn.Linear(num_labels, hidden_channels, dtype=dtype)
+        self.label_emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
+        self.act = activation()
+        self.linears_tensor = nn.ModuleList()
+        for _ in range(3):
+            self.linears_tensor.append(
+                nn.Linear(hidden_channels, hidden_channels, bias=False)
+            )
+        self.linears_scalar = nn.ModuleList()
+        self.linears_scalar.append(
+            nn.Linear(hidden_channels, 2 * hidden_channels, bias=True, dtype=dtype)
+        )
+        self.linears_scalar.append(
+            nn.Linear(2 * hidden_channels, 3 * hidden_channels, bias=True, dtype=dtype)
+        )
+        self.init_norm = nn.LayerNorm(hidden_channels, dtype=dtype)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.distance_proj1.reset_parameters()
+        self.distance_proj2.reset_parameters()
+        self.distance_proj3.reset_parameters()
+        self.emb.reset_parameters()
+        self.emb2.reset_parameters()
+        for linear in self.linears_tensor:
+            linear.reset_parameters()
+        for linear in self.linears_scalar:
+            linear.reset_parameters()
+        self.init_norm.reset_parameters()
+
+    def _get_atomic_number_message(self, z: Tensor, edge_index: Tensor) -> Tensor:
+        Z = self.emb(z)
+        Zij = self.emb2(
+            Z.index_select(0, edge_index.t().reshape(-1)).view(
+                -1, self.hidden_channels * 2
+            )
+        )[..., None, None]
+        return Zij
+
+    def _get_atomic_label_message(self, label: Tensor, edge_index: Tensor) -> Tensor:
+        L = self.label_emb(label)
+        Lij = self.label_emb2(
+            L.index_select(0, edge_index.t().reshape(-1)).view(
+                -1, self.hidden_channels * 2
+            )
+        )[..., None, None]
+        return Lij
+
+    def _get_tensor_messages(
+        self, Zij: Tensor, edge_weight: Tensor, edge_vec_norm: Tensor, edge_attr: Tensor
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        C = self.cutoff(edge_weight).reshape(-1, 1, 1, 1) * Zij
+        eye = torch.eye(3, 3, device=edge_vec_norm.device, dtype=edge_vec_norm.dtype)[
+            None, None, ...
+        ]
+        Iij = self.distance_proj1(edge_attr)[..., None, None] * C * eye
+        Aij = (
+            self.distance_proj2(edge_attr)[..., None, None]
+            * C
+            * vector_to_skewtensor(edge_vec_norm)[..., None, :, :]
+        )
+        Sij = (
+            self.distance_proj3(edge_attr)[..., None, None]
+            * C
+            * vector_to_symtensor(edge_vec_norm)[..., None, :, :]
+        )
+        return Iij, Aij, Sij
+
+    def forward(
+        self,
+        z: Tensor,
+        edge_index: Tensor,
+        edge_weight: Tensor,
+        edge_vec_norm: Tensor,
+        edge_attr: Tensor,
+        label: Optional(Tensor),
+    ) -> Tensor:
+        Zij = self._get_atomic_number_message(z, edge_index)
+
+        Lij = self._get_atomic_label_message(label, edge_index)
+
+        Iij, Aij, Sij = self._get_tensor_messages(
+            Zij + Lij, edge_weight, edge_vec_norm, edge_attr
+        )
+        source = torch.zeros(
+            z.shape[0], self.hidden_channels, 3, 3, device=z.device, dtype=Iij.dtype
+        )
+        I = source.index_add(dim=0, index=edge_index[0], source=Iij)
+        A = source.index_add(dim=0, index=edge_index[0], source=Aij)
+        S = source.index_add(dim=0, index=edge_index[0], source=Sij)
+        norm = self.init_norm(tensor_norm(I + A + S))
+        for linear_scalar in self.linears_scalar:
+            norm = self.act(linear_scalar(norm))
+        norm = norm.reshape(-1, self.hidden_channels, 3)
+        I = (
+            self.linears_tensor[0](I.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+            * norm[..., 0, None, None]
+        )
+        A = (
+            self.linears_tensor[1](A.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+            * norm[..., 1, None, None]
+        )
+        S = (
+            self.linears_tensor[2](S.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+            * norm[..., 2, None, None]
+        )
+        X = I + A + S
+        return X
+
 
 class TensorNet(nn.Module):
     r"""TensorNet's architecture. From

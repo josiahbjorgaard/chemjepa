@@ -38,6 +38,7 @@ class TensorEmbedding(nn.Module):
         self.distance_proj3 = nn.Linear(num_rbf, hidden_channels, dtype=dtype)
         self.cutoff = CosineCutoff(cutoff_lower, cutoff_upper)
         self.max_z = max_z
+        self.mask_token = nn.Parameter(torch.randn(hidden_channels, requires_grad= True))
         self.emb = nn.Embedding(max_z, hidden_channels, dtype=dtype)
         self.emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
         self.label_emb = nn.Linear(num_labels, hidden_channels, dtype=dtype)
@@ -81,7 +82,7 @@ class TensorEmbedding(nn.Module):
 
     def _get_atomic_label_message(self, label: Tensor, label_mask: Tensor, edge_index: Tensor) -> Tensor:
         L = self.label_emb(label)
-        L[label_mask] = 0.0
+        L[label_mask] = self.mask_token #FIXME this is not broadcasting correctly
         Lij = self.label_emb2(
             L.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2

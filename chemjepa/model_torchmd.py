@@ -41,6 +41,7 @@ class TensorEmbedding(nn.Module):
         self.mask_token = nn.Parameter(torch.randn(hidden_channels, requires_grad= True))
         self.emb = nn.Embedding(max_z, hidden_channels, dtype=dtype)
         self.emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
+        print(num_labels)
         self.label_emb = nn.Linear(num_labels, hidden_channels, dtype=dtype)
         self.label_emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
         self.act = activation()
@@ -222,6 +223,7 @@ class TensorNet(nn.Module):
         cutoff_lower=0,
         cutoff_upper=4.5,
         max_num_neighbors=64,
+        num_labels=1,
         max_z=128,
         equivariance_invariance_group="O(3)",
         static_shapes=True,
@@ -264,6 +266,7 @@ class TensorNet(nn.Module):
             cutoff_upper,
             trainable_rbf,
             max_z,
+            num_labels,
             dtype,
         )
 

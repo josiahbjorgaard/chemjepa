@@ -230,7 +230,6 @@ class TensorNet(nn.Module):
         check_errors=True,
         dtype=torch.float32,
         box_vecs=None,
-        predictor=False,
     ):
         super(TensorNet, self).__init__()
 
@@ -313,7 +312,7 @@ class TensorNet(nn.Module):
         self.linear.reset_parameters()
         self.out_norm.reset_parameters()
 
-    def pre_forward(
+    def forward(
         self,
         z: Tensor,
         pos: Tensor,
@@ -359,7 +358,85 @@ class TensorNet(nn.Module):
         # I avoid dividing by zero by setting the weight of self edges and self loops to 1
         edge_vec = edge_vec / edge_weight.masked_fill(mask, 1).unsqueeze(1)
         X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr, lp, lmp)
+        for layer in self.layers:
+            X = layer(X, edge_index, edge_weight, edge_attr, q)
         return X, edge_index, edge_weight, edge_attr, q
+
+
+class TensorNetPredictor(nn.Module):
+    def __init__(
+        self,
+        hidden_channels=128,
+        num_layers=2,
+        num_rbf=32,
+        rbf_type="expnorm",
+        trainable_rbf=False,
+        activation="silu",
+        cutoff_lower=0,
+        cutoff_upper=4.5,
+        max_num_neighbors=64,
+        num_labels=1,
+        max_z=128,
+        equivariance_invariance_group="O(3)",
+        static_shapes=True,
+        check_errors=True,
+        dtype=torch.float32,
+        box_vecs=None,
+    ):
+        super(TensorNet, self).__init__()
+
+        assert rbf_type in rbf_class_mapping, (
+            f'Unknown RBF type "{rbf_type}". '
+            f'Choose from {", ".join(rbf_class_mapping.keys())}.'
+        )
+        assert activation in act_class_mapping, (
+            f'Unknown activation function "{activation}". '
+            f'Choose from {", ".join(act_class_mapping.keys())}.'
+        )
+
+        assert equivariance_invariance_group in ["O(3)", "SO(3)"], (
+            f'Unknown group "{equivariance_invariance_group}". '
+            f"Choose O(3) or SO(3)."
+        )
+        self.hidden_channels = hidden_channels
+        self.equivariance_invariance_group = equivariance_invariance_group
+        self.num_layers = num_layers
+        self.num_rbf = num_rbf
+        self.rbf_type = rbf_type
+        self.activation = activation
+        self.cutoff_lower = cutoff_lower
+        self.cutoff_upper = cutoff_upper
+        act_class = act_class_mapping[activation]
+
+        self.layers = nn.ModuleList()
+        if num_layers != 0:
+            for _ in range(num_layers):
+                self.layers.append(
+                    Interaction(
+                        num_rbf,
+                        hidden_channels,
+                        act_class,
+                        cutoff_lower,
+                        cutoff_upper,
+                        equivariance_invariance_group,
+                        dtype,
+                    )
+                )
+        self.linear = nn.Linear(3 * hidden_channels, hidden_channels, dtype=dtype)
+        self.out_norm = nn.LayerNorm(3 * hidden_channels, dtype=dtype)
+        self.act = act_class()
+        # Resize to fit set to false ensures Distance returns a statically-shaped tensor of size max_num_pairs=pos.size*max_num_neigbors
+        # negative max_num_pairs argument means "per particle"
+        # long_edge_index set to False saves memory and spares some kernel launches by keeping neighbor indices as int32.
+        self.static_shapes = static_shapes
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for layer in self.layers:
+            layer.reset_parameters()
+        self.linear.reset_parameters()
+        self.out_norm.reset_parameters()
 
 
     def forward(
@@ -372,7 +449,7 @@ class TensorNet(nn.Module):
     ) -> Tensor:
         for layer in self.layers:
             X = layer(X, edge_index, edge_weight, edge_attr, q)
-        return X
+        return self.post_forward(X)
 
     def post_forward(
             self,

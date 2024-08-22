@@ -8,15 +8,8 @@ import torch
 class PairsDataset(Dataset):
     """Face Landmarks dataset."""
 
-    def __init__(self, source, mask = 0.0, transform=None):
-        """
-        Arguments:
-            csv_file (string): Path to the csv file with annotations.
-            root_dir (string): Directory with all the images.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
-        """
-        self.dataset = datasets.load_from_disk(source).with_format('torch')
+    def __init__(self, dataset, mask = 0.0, transform=None):
+        self.dataset = dataset #datasets.load_from_disk(source).with_format('torch')
         self.transform = transform
         self.keys = {'pos':'coordinates1',
                      'pos2':'coordinates2',

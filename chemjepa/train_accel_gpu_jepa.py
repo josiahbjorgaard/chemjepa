@@ -8,10 +8,10 @@ from torch import nn
 from torch.optim import AdamW
 from torch_geometric.loader import DataLoader
 from transformers import get_scheduler
-from model_torchmd import TensorNet
+from model_torchmd import TensorNet, TensorNetPredictor
 from utils.training import get_param_norm, get_grad_norm, count_parameters, move_to
 from utils.config import training_config, get_model_config
-#ifrom utils.dataset import setup_data
+from utils.dataset import setup_data
 from utils.dataset import PairsDataset
 from accelerate import Accelerator
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
@@ -29,13 +29,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 torch.manual_seed(config.seed)
-"""
 datasets = setup_data(config.dataset,
                       split=config.split,
                       ds_frac=config.ds_frac,
                       ds_seed=config.ds_seed)
 
-"""# Collator
 model_config = get_model_config(config)
 device = accelerator.device
 
@@ -44,7 +42,7 @@ xenc_model = TensorNet() #**model_config['tensornet'])
 decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 #yenc_model = xenc_model
-pred_model = TensorNet() #**model_config['tensornet'])
+pred_model = TensorNetPredictor() #**model_config['tensornet'])
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
 
@@ -60,19 +58,19 @@ accelerator.init_trackers(
     )
 
 # Dataset from TensorNet
-dataset = PairsDataset("../notebooks/ani1x_pairs_filtered",mask=0.2)
-
+train_dataset = PairsDataset(datasets['train'], mask=0.2)
+test_dataset = PairsDataset(datasets['test'], mask=0.2)
 # Creating a DataLoader object for iterating over it during the training epochs
-train_dl = DataLoader(dataset, batch_size=config.batch_size,
-                       shuffle=True, num_workers=8, prefetch_factor=4,
-                       )
-#eval_dl = DataLoader(datasets["test"], batch_size=config.batch_size,
-#                       num_workers=8, prefetch_factor=4)
+train_dl = DataLoader(train_dataset, batch_size=config.batch_size,
+                       shuffle=True, num_workers=8, prefetch_factor=4)
+eval_dl = DataLoader(test_dataset, batch_size=config.batch_size,
+                       num_workers=8, prefetch_factor=4)
 
 accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
 accelerator.print(f"Number of encoder non-embedding parameters: {config.encoder_n_params_nonemb/10**6}M")
 accelerator.print(f"Number of predictor non-embedding parameters: {config.predictor_n_params_nonemb/10**6}M")
-accelerator.print(f"Number of training samples: {len(dataset)}")
+accelerator.print(f"Number of training samples: {len(dataset['train'])}")
+accelerator.print(f"Number of testing samples: {len(datasets['test'])}")
 accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
 num_training_steps = config.epochs * len(train_dl)
@@ -104,8 +102,8 @@ if config.restart:
         for param_group in optimizer.param_groups:
             param_group['lr'] = config.reset_lr
 
-xenc_model, yenc_model, pred_model, optimizer, train_dl,  lr_scheduler, loss_function  = accelerator.prepare(
-     xenc_model, yenc_model, pred_model, optimizer, train_dl,  lr_scheduler, loss_function
+xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function  = accelerator.prepare(
+     xenc_model, yenc_model, pred_model, optimizer, train_dl, eval_dl, lr_scheduler, loss_function
      )
 
 #yenc_model.to(accelerator.device)
@@ -122,18 +120,14 @@ for epoch in range(config.start_epoch, config.epochs):
         #TODO pairing and masking should be done previously
         #batch, xbatch = move_to(batch, device), move_to(xbatch, device)
 
-        xX, edge_index, edge_weight, edge_attr, q = xenc_model.module.pre_forward(batch['z'],batch['pos'], 
+        xX, x, edge_index, edge_weight, edge_attr, q = xenc_model(batch['z'],batch['pos'], 
                   batch['batch'], batch['label'], batch['mask'])
-        x = xenc_model(xX, edge_index, edge_weight, edge_attr, q) #x in the context
         
         with torch.no_grad():
-            yX, edge_index, edge_weight, edge_attr, q = yenc_model.module.module.pre_forward(batch['z'],batch['pos2'],
+            yY, y, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'],batch['pos2'],
                     batch['batch'], batch['label2'], None)
-            y = yenc_model(yX, edge_index, edge_weight, edge_attr, q) #Target Encoder
-            y = yenc_model.module.module.post_forward(y)
 
-        x = pred_model(x, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
-        x = pred_model.module.post_forward(x)
+        x = pred_model(xX, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
 
         mask = batch['mask'] # atoms with masked forces in context encoder
         loss = loss_function(x[mask], y[mask]) #Loss is only for masked tokens

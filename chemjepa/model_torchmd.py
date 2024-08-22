@@ -360,8 +360,20 @@ class TensorNet(nn.Module):
         X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr, lp, lmp)
         for layer in self.layers:
             X = layer(X, edge_index, edge_weight, edge_attr, q)
-        return X, edge_index, edge_weight, edge_attr, q
-
+        return X, self.post_forward(X), edge_index, edge_weight, edge_attr, q
+    
+    def post_forward(
+            self,
+            X
+            ):
+        I, A, S = decompose_tensor(X)
+        x = torch.cat((tensor_norm(I), tensor_norm(A), tensor_norm(S)), dim=-1)
+        x = self.out_norm(x)
+        x = self.act(self.linear((x)))
+        # # Remove the extra atom
+        if self.static_shapes:
+            x = x[:-1]
+        return x
 
 class TensorNetPredictor(nn.Module):
     def __init__(
@@ -383,7 +395,7 @@ class TensorNetPredictor(nn.Module):
         dtype=torch.float32,
         box_vecs=None,
     ):
-        super(TensorNet, self).__init__()
+        super(TensorNetPredictor, self).__init__()
 
         assert rbf_type in rbf_class_mapping, (
             f'Unknown RBF type "{rbf_type}". '

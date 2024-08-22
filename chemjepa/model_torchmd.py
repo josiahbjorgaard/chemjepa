@@ -8,6 +8,7 @@ from torchmdnet.models.utils import (
     act_class_mapping,
 )
 from torchmdnet.models.tensornet import *
+from torchmdnet.models.tensornet import Interaction, vector_to_skewtensor, vector_to_symtensor, tensor_norm, decompose_tensor
 
 # Code refactor from source to facilitate context/predictor modules
 # and add force/energy features
@@ -41,7 +42,6 @@ class TensorEmbedding(nn.Module):
         self.mask_token = nn.Parameter(torch.randn(hidden_channels, requires_grad= True))
         self.emb = nn.Embedding(max_z, hidden_channels, dtype=dtype)
         self.emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
-        print(num_labels)
         self.label_emb = nn.Linear(num_labels, hidden_channels, dtype=dtype)
         self.label_emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
         self.act = activation()
@@ -74,6 +74,7 @@ class TensorEmbedding(nn.Module):
 
     def _get_atomic_number_message(self, z: Tensor, edge_index: Tensor) -> Tensor:
         Z = self.emb(z)
+        print(f"{Z.shape= }")
         Zij = self.emb2(
             Z.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2
@@ -82,8 +83,14 @@ class TensorEmbedding(nn.Module):
         return Zij
 
     def _get_atomic_label_message(self, label: Tensor, label_mask: Tensor, edge_index: Tensor) -> Tensor:
-        L = self.label_emb(label)
-        L[label_mask] = self.mask_token #FIXME this is not broadcasting correctly
+        print(f"{label.shape= }")
+        L = self.label_emb(label.unsqueeze(2)).squeeze()
+        print(f"{L.shape= }")
+        if label_mask is not None:
+            print(f"{L= }")
+            print(f"{label_mask= }")
+            L[label_mask.squeeze()] = self.mask_token #FIXME squeeze here breaks batching
+            print(f"{L= }")
         Lij = self.label_emb2(
             L.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2
@@ -122,7 +129,6 @@ class TensorEmbedding(nn.Module):
         labels_mask: Tensor,
     ) -> Tensor:
         Zij = self._get_atomic_number_message(z, edge_index)
-
         Lij = self._get_atomic_label_message(labels, labels_mask, edge_index)
 
         Iij, Aij, Sij = self._get_tensor_messages(
@@ -318,6 +324,7 @@ class TensorNet(nn.Module):
         pos: Tensor,
         batch: Tensor,
         labels: Optional[Tensor] = None,
+        labels_mask: Optional[Tensor] = None,
         box: Optional[Tensor] = None,
         q: Optional[Tensor] = None,
         s: Optional[Tensor] = None, #Not used...
@@ -335,10 +342,15 @@ class TensorNet(nn.Module):
         else:
             q = q[batch]
         zp = z
+        lp = labels
+        lmp = labels_mask
         if self.static_shapes:
             mask = (edge_index[0] < 0).unsqueeze(0).expand_as(edge_index)
             zp = torch.cat((z, torch.zeros(1, device=z.device, dtype=z.dtype)), dim=0)
             q = torch.cat((q, torch.zeros(1, device=q.device, dtype=q.dtype)), dim=0)
+            lp = torch.cat((lp, torch.zeros(lp.shape[0], device=lp.device, dtype=lp.dtype).unsqueeze(1)), dim=1)
+            if lmp is not None:
+                lmp = torch.cat((lmp, torch.zeros(lmp.shape[0], device=lmp.device, dtype=lmp.dtype).unsqueeze(1)), dim=1)
             # I trick the model into thinking that the masked edges pertain to the extra atom
             # WARNING: This can hurt performance if max_num_pairs >> actual_num_pairs
             edge_index = edge_index.masked_fill(mask, z.shape[0])
@@ -351,7 +363,7 @@ class TensorNet(nn.Module):
         # Normalizing edge vectors by their length can result in NaNs, breaking Autograd.
         # I avoid dividing by zero by setting the weight of self edges and self loops to 1
         edge_vec = edge_vec / edge_weight.masked_fill(mask, 1).unsqueeze(1)
-        X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr, labels)
+        X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr, lp, lmp)
         return X, edge_index, edge_weight, edge_attr, q
 
 

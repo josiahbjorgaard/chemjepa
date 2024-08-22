@@ -74,7 +74,6 @@ class TensorEmbedding(nn.Module):
 
     def _get_atomic_number_message(self, z: Tensor, edge_index: Tensor) -> Tensor:
         Z = self.emb(z)
-        print(f"{Z.shape= }")
         Zij = self.emb2(
             Z.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2
@@ -83,14 +82,9 @@ class TensorEmbedding(nn.Module):
         return Zij
 
     def _get_atomic_label_message(self, label: Tensor, label_mask: Tensor, edge_index: Tensor) -> Tensor:
-        print(f"{label.shape= }")
-        L = self.label_emb(label.unsqueeze(2)).squeeze()
-        print(f"{L.shape= }")
+        L = self.label_emb(label.unsqueeze(1)).squeeze()
         if label_mask is not None:
-            print(f"{L= }")
-            print(f"{label_mask= }")
-            L[label_mask.squeeze()] = self.mask_token #FIXME squeeze here breaks batching
-            print(f"{L= }")
+            L[label_mask] = self.mask_token
         Lij = self.label_emb2(
             L.index_select(0, edge_index.t().reshape(-1)).view(
                 -1, self.hidden_channels * 2
@@ -236,6 +230,7 @@ class TensorNet(nn.Module):
         check_errors=True,
         dtype=torch.float32,
         box_vecs=None,
+        predictor=False,
     ):
         super(TensorNet, self).__init__()
 
@@ -348,9 +343,9 @@ class TensorNet(nn.Module):
             mask = (edge_index[0] < 0).unsqueeze(0).expand_as(edge_index)
             zp = torch.cat((z, torch.zeros(1, device=z.device, dtype=z.dtype)), dim=0)
             q = torch.cat((q, torch.zeros(1, device=q.device, dtype=q.dtype)), dim=0)
-            lp = torch.cat((lp, torch.zeros(lp.shape[0], device=lp.device, dtype=lp.dtype).unsqueeze(1)), dim=1)
+            lp = torch.cat((lp, torch.zeros(1, device=lp.device, dtype=lp.dtype)), dim=0)
             if lmp is not None:
-                lmp = torch.cat((lmp, torch.zeros(lmp.shape[0], device=lmp.device, dtype=lmp.dtype).unsqueeze(1)), dim=1)
+                lmp = torch.cat((lmp, torch.zeros(1, device=lmp.device, dtype=lmp.dtype)), dim=0)
             # I trick the model into thinking that the masked edges pertain to the extra atom
             # WARNING: This can hurt performance if max_num_pairs >> actual_num_pairs
             edge_index = edge_index.masked_fill(mask, z.shape[0])

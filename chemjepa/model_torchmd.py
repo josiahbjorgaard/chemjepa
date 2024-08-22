@@ -461,7 +461,8 @@ class TensorNetPredictor(nn.Module):
     ) -> Tensor:
         for layer in self.layers:
             X = layer(X, edge_index, edge_weight, edge_attr, q)
-        return self.post_forward(X)
+        X_ret = X[:-1] if self.static_shapes else X
+        return X_ret, self.post_forward(X)
 
     def post_forward(
             self,

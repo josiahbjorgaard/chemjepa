@@ -120,14 +120,16 @@ for epoch in range(config.start_epoch, config.epochs):
         #TODO pairing and masking should be done previously
         #batch, xbatch = move_to(batch, device), move_to(xbatch, device)
 
-        xX, x, edge_index, edge_weight, edge_attr, q = xenc_model(batch['z'],batch['pos'], 
+        xX, _, edge_index, edge_weight, edge_attr, q = xenc_model(batch['z'],batch['pos'],
                   batch['batch'], batch['label'], batch['mask'])
-        
+        enc_mean, enc_var = xX.mean(), xX.var()
         with torch.no_grad():
-            yY, y, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'],batch['pos2'],
+            yY, _, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'],batch['pos2'],
                     batch['batch'], batch['label2'], None)
+            y_mean, y_var = yY.mean(), yY.var()
 
-        x = pred_model(xX, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
+        xX = pred_model(xX, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
+        pred_mean, pred_var = xX.mean(), xX.var()
 
         mask = batch['mask'] # atoms with masked forces in context encoder
         loss = loss_function(x[mask], y[mask]) #Loss is only for masked tokens
@@ -152,12 +154,12 @@ for epoch in range(config.start_epoch, config.epochs):
             progress_bar.update(world_size)
 
         accelerator.log({"total_loss": loss.detach().to("cpu"),
-                         #"xenc_var": enc_var,
-                         #"pred_var": pred_var,
-                         #"yenc_var": y_var,
-                         #'xenc_mean': enc_mean,
-                         #'pred_mean': pred_mean,
-                         #'yenc_mean': y_mean,
+                         "xenc_var": enc_var,
+                         "pred_var": pred_var,
+                         "yenc_var": y_var,
+                         'xenc_mean': enc_mean,
+                         'pred_mean': pred_mean,
+                         'yenc_mean': y_mean,
                          "xenc_param_norm": get_param_norm(xenc_model).to("cpu"),
                          "xenc_grad_norm": get_grad_norm(xenc_model).to("cpu"),
                          "pred_param_norm": get_param_norm(pred_model).to("cpu"),
@@ -166,7 +168,29 @@ for epoch in range(config.start_epoch, config.epochs):
     #Epoch end log and checkpoint
     os.makedirs(os.path.join(config.output_dir, str(epoch)), exist_ok=True)
     accelerator.save_state(os.path.join(config.output_dir, str(epoch)))
+    xenc_model.eval()
+    pred_model.eval()
+    yenc_model.eval()
+    with torch.no_grad():
+        for idb, batch in tqdm(enumerate(eval_dl)):
+            xX, _, edge_index, edge_weight, edge_attr, q = xenc_model(batch['z'], batch['pos'],
+                                                                      batch['batch'], batch['label'], batch['mask'])
 
+            yY, y, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'], batch['pos2'],
+                                                                      batch['batch'], batch['label2'], None)
+
+            x = pred_model(xX, edge_index, edge_weight, edge_attr, q)  # pred model - use target geometry with context embeddings
+
+            mask = batch['mask']  # atoms with masked forces in context encoder
+            loss = loss_function(x[mask], y[mask])  # Loss is only for masked tokens
+            if torch.isnan(loss):
+                print(f"{loss=}")
+                for k, v in batch.items():
+                    if torch.isnan(v).sum():
+                        print(k)
+                        print(torch.isnan(v).sum())
+
+            accelerator.log({"val_step_loss": loss.detach().to("cpu")})
 logger.info("End training: {}".format(strftime("%Y-%m-%d %H:%M:%S", gmtime())))
 accelerator.save_model(xenc_model, config.output_dir + "xenc_model", safe_serialization=True)
 accelerator.save_model(pred_model, config.output_dir + "pred_model", safe_serialization=True)

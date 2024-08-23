@@ -477,3 +477,47 @@ class TensorNetPredictor(nn.Module):
         if self.static_shapes:
             x = x[:-1]
         return x
+
+class TensorNetHead(nn.Module):
+    def __init__(
+        self,
+        hidden_channels=128,
+        activation="silu",
+        static_shapes=True,
+        dtype=torch.float32,
+        **kwargs,
+    ):
+        super(TensorNetHead, self).__init__()
+
+        assert activation in act_class_mapping, (
+            f'Unknown activation function "{activation}". '
+            f'Choose from {", ".join(act_class_mapping.keys())}.'
+        )
+
+        act_class = act_class_mapping[activation]
+        self.linear = nn.Linear(3 * hidden_channels, hidden_channels, dtype=dtype)
+        self.out_norm = nn.LayerNorm(3 * hidden_channels, dtype=dtype)
+        self.act = act_class()
+        # Resize to fit set to false ensures Distance returns a statically-shaped tensor of size max_num_pairs=pos.size*max_num_neigbors
+        # negative max_num_pairs argument means "per particle"
+        # long_edge_index set to False saves memory and spares some kernel launches by keeping neighbor indices as int32.
+        self.static_shapes = static_shapes
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.linear.reset_parameters()
+        self.out_norm.reset_parameters()
+
+    def forward(
+            self,
+            X
+            ):
+        I, A, S = decompose_tensor(X)
+        x = torch.cat((tensor_norm(I), tensor_norm(A), tensor_norm(S)), dim=-1)
+        x = self.out_norm(x)
+        x = self.act(self.linear((x)))
+        # # Remove the extra atom
+        if self.static_shapes:
+            x = x[:-1]
+        return x

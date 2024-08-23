@@ -39,7 +39,7 @@ class TensorEmbedding(nn.Module):
         self.distance_proj3 = nn.Linear(num_rbf, hidden_channels, dtype=dtype)
         self.cutoff = CosineCutoff(cutoff_lower, cutoff_upper)
         self.max_z = max_z
-        self.mask_token = nn.Parameter(torch.randn(hidden_channels, requires_grad= True))
+        self.mask_token = nn.Parameter(torch.randn(hidden_channels, requires_grad= True, dtype = dtype))
         self.emb = nn.Embedding(max_z, hidden_channels, dtype=dtype)
         self.emb2 = nn.Linear(2 * hidden_channels, hidden_channels, dtype=dtype)
         self.label_emb = nn.Linear(num_labels, hidden_channels, dtype=dtype)
@@ -230,6 +230,7 @@ class TensorNet(nn.Module):
         check_errors=True,
         dtype=torch.float32,
         box_vecs=None,
+        **kwargs,
     ):
         super(TensorNet, self).__init__()
 
@@ -394,6 +395,7 @@ class TensorNetPredictor(nn.Module):
         check_errors=True,
         dtype=torch.float32,
         box_vecs=None,
+        **kwargs,
     ):
         super(TensorNetPredictor, self).__init__()
 
@@ -461,8 +463,7 @@ class TensorNetPredictor(nn.Module):
     ) -> Tensor:
         for layer in self.layers:
             X = layer(X, edge_index, edge_weight, edge_attr, q)
-        X_ret = X[:-1] if self.static_shapes else X
-        return X_ret, self.post_forward(X)
+        return X, self.post_forward(X)
 
     def post_forward(
             self,

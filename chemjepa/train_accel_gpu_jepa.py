@@ -18,7 +18,7 @@ from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 torch.autograd.set_detect_anomaly(True)
 from accelerate import DistributedDataParallelKwargs
 from safetensors.torch import load_model
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True)
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], log_with="wandb")
 #accelerator = Accelerator(log_with="wandb")
@@ -38,11 +38,11 @@ model_config = get_model_config(config)
 device = accelerator.device
 
 # Model
-xenc_model = TensorNet() #**model_config['tensornet'])
+xenc_model = TensorNet(**model_config['encoder']) #, dtype = torch.bfloat16)
 decay = model_config['encoder']['ema_decay']
 yenc_model = AveragedModel(xenc_model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 #yenc_model = xenc_model
-pred_model = TensorNetPredictor() #**model_config['tensornet'])
+pred_model = TensorNetPredictor(**model_config['predictor']) #, dtype = torch.bfloat16)
 config.encoder_n_params_emb, config.encoder_n_params_nonemb = count_parameters(xenc_model, print_summary=False)
 config.predictor_n_params_emb, config.predictor_n_params_nonemb = count_parameters(pred_model, print_summary=False)
 
@@ -69,7 +69,7 @@ eval_dl = DataLoader(test_dataset, batch_size=config.batch_size,
 accelerator.print(f"Number of encoder embedding parameters: {config.encoder_n_params_emb/10**6}M")
 accelerator.print(f"Number of encoder non-embedding parameters: {config.encoder_n_params_nonemb/10**6}M")
 accelerator.print(f"Number of predictor non-embedding parameters: {config.predictor_n_params_nonemb/10**6}M")
-accelerator.print(f"Number of training samples: {len(dataset['train'])}")
+accelerator.print(f"Number of training samples: {len(datasets['train'])}")
 accelerator.print(f"Number of testing samples: {len(datasets['test'])}")
 accelerator.print(f"Number of training batches per epoch: {len(train_dl)}")
 
@@ -128,11 +128,12 @@ for epoch in range(config.start_epoch, config.epochs):
                     batch['batch'], batch['label2'], None)
             y_mean, y_var = yY.mean(), yY.var()
 
-        xX = pred_model(xX, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
+        xX, _ = pred_model(xX, edge_index, edge_weight, edge_attr, q) #pred model - use target geometry with context embeddings
         pred_mean, pred_var = xX.mean(), xX.var()
 
         mask = batch['mask'] # atoms with masked forces in context encoder
-        loss = loss_function(x[mask], y[mask]) #Loss is only for masked tokens
+        xX, yY = xX[:-1], yY[:-1]
+        loss = loss_function(xX[mask], yY[mask]) #Loss is only for masked tokens
         if torch.isnan(loss):
             print(f"{loss=}")
             for k,v in batch.items():
@@ -176,13 +177,14 @@ for epoch in range(config.start_epoch, config.epochs):
             xX, _, edge_index, edge_weight, edge_attr, q = xenc_model(batch['z'], batch['pos'],
                                                                       batch['batch'], batch['label'], batch['mask'])
 
-            yY, y, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'], batch['pos2'],
+            yY, _, edge_index, edge_weight, edge_attr, q = yenc_model(batch['z'], batch['pos2'],
                                                                       batch['batch'], batch['label2'], None)
 
-            x = pred_model(xX, edge_index, edge_weight, edge_attr, q)  # pred model - use target geometry with context embeddings
+            xX, _ = pred_model(xX, edge_index, edge_weight, edge_attr, q)  # pred model - use target geometry with context embeddings
 
             mask = batch['mask']  # atoms with masked forces in context encoder
-            loss = loss_function(x[mask], y[mask])  # Loss is only for masked tokens
+            xX, yY = xX[:-1], yY[:-1]
+            loss = loss_function(xX[mask], yY[mask])  # Loss is only for masked tokens
             if torch.isnan(loss):
                 print(f"{loss=}")
                 for k, v in batch.items():
